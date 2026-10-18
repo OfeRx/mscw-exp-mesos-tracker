@@ -14,7 +14,7 @@ reviewed it, so like any third-party tool, use it at your own risk.
 
 ## Setting it up
 
-You need **Windows** and **Python 3.10 or newer** (from [python.org](https://www.python.org);
+You need **Windows** and **Python 3.14 or newer** (from [python.org](https://www.python.org);
 tick "Add python.exe to PATH" when installing).
 
 1. Get the code: `git clone` this repository, or download it as a ZIP and unzip it.
