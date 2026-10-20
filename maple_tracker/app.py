@@ -33,9 +33,10 @@ def crop(img, rect):
 class Reader(threading.Thread):
     """Screenshots the game about once a second, finds the numbers and queues what it read."""
 
-    def __init__(self, store, locator, jobs, out, interval=1.0):
+    def __init__(self, store, locator, jobs, out, own=lambda: [], interval=1.0):
         super().__init__(daemon=True)
         self.store, self.locator, self.jobs, self.out = store, locator, jobs, out
+        self.own = own                  # where our own windows are, to black out
         self.interval = interval
         self.stopped = threading.Event()
 
@@ -56,7 +57,7 @@ class Reader(threading.Thread):
         jobs = self.jobs()
         rect, game = sc.frame_rect()
         res = {"t": time.time(), "game": game, "frame": rect}
-        img = sc.grab(rect)
+        img = screen.blank_own(sc.grab(rect), rect, self.own())
         if img is None:
             return res
         g = gray(img)
@@ -82,7 +83,7 @@ class Reader(threading.Thread):
 
     def _read_screen(self, sc, kind, region, origin):
         r = region_rect(region, origin)
-        return self._read(kind, sc.grab(r)) if r else None
+        return self._read(kind, screen.blank_own(sc.grab(r), r, self.own())) if r else None
 
     def _read(self, kind, img):
         if img is None:
@@ -102,9 +103,10 @@ class ItemScanner(threading.Thread):
     QUICKSLOT_EVERY = 20        # seconds between looking again for what's on the quickslot
     INVENTORY_EVERY = 4
 
-    def __init__(self, store, library, out, interval=2.0):
+    def __init__(self, store, library, out, own=lambda: [], interval=2.0):
         super().__init__(daemon=True)
         self.store, self.library, self.out, self.interval = store, library, out, interval
+        self.own = own
         self.stopped = threading.Event()
         self.wake = threading.Event()    # set to scan now rather than at the next interval
         self.locator = Locator()
@@ -133,7 +135,7 @@ class ItemScanner(threading.Thread):
         out = {"t": time.time(), "quick": {}, "inventory": None, "unread": [], "read": [],
                "inventory_open": False}
         rect, _ = sc.frame_rect()
-        img = sc.grab(rect)
+        img = screen.blank_own(sc.grab(rect), rect, self.own())
         if img is None:
             return out
         g = gray(img)
@@ -219,10 +221,11 @@ class App:
         self.skip_teach = {}                # key -> time until which it isn't asked again
         self.q = queue.Queue()
         self._update_jobs()
-        self.reader = Reader(self.store, self.locator, lambda: self._jobs, self.q)
+        self.own_rects = []                 # where our windows are, kept up to date by _tick
+        self.reader = Reader(self.store, self.locator, lambda: self._jobs, self.q, lambda: self.own_rects)
         self.reader.start()
         self.item_q = queue.Queue()
-        self.scanner = ItemScanner(self.store, self.library, self.item_q)
+        self.scanner = ItemScanner(self.store, self.library, self.item_q, lambda: self.own_rects)
         self.scanner.start()
         self.item_download = None           # None, "running", "done" or the error
         self.exp_table = itemdata.exp_table()  # level -> EXP to next level, for the level badge
@@ -301,7 +304,9 @@ class App:
                       cursor="hand2").pack(side="left", padx=(0, 4))
         self.teach_entry = entry
         self._teaching = None
-        r.after(200, lambda: screen.exclude_from_capture(r))
+        self.card.bind("<Button-3>", self._menu)
+        self.hide_var = tk.BooleanVar(value=bool(self.cfg.get("hide_from_capture")))
+        r.after(200, lambda: self.apply_capture(r))
 
     # Clicks on the card: a button acts when released over it; anywhere else drags the window.
     def _press(self, e):
@@ -337,6 +342,28 @@ class App:
             self.card.config(cursor="hand2" if name else "fleur")
             self._redraw()
 
+    def apply_capture(self, window):
+        """Show the window in screenshots and screen sharing, or hide it, as set."""
+        screen.set_capture_hidden(window, bool(self.cfg.get("hide_from_capture")))
+
+    def _menu(self, e):
+        bg, fg = "#2a2017", "#fcf8f0"
+        menu = tk.Menu(self.root, tearoff=0, bg=bg, fg=fg, activebackground="#6e5639",
+                       activeforeground=fg, font=FONT)
+        menu.add_checkbutton(label="Hide from screenshots and screen sharing",
+                             variable=self.hide_var, command=self._toggle_hidden)
+        menu.add_separator()
+        menu.add_command(label="Quit", command=self.quit)
+        menu.tk_popup(e.x_root, e.y_root)
+
+    def _toggle_hidden(self):
+        self.cfg["hide_from_capture"] = self.hide_var.get()
+        config.save(self.cfg)
+        for w in self._windows():
+            self.apply_capture(w)
+        self.flash = ("Hidden from screenshots and screen sharing." if self.hide_var.get()
+                      else "Shown in screenshots and screen sharing.", time.time() + 4)
+
     def _toggle_details(self):
         self.expanded = not self.expanded
         self.cfg["details_open"] = self.expanded
@@ -365,7 +392,7 @@ class App:
     def grab_frame(self):
         """A screenshot of the game (UI thread) and where it is on screen."""
         rect, _ = self.ui_screen.frame_rect()
-        return self.ui_screen.grab(rect), rect
+        return screen.blank_own(self.ui_screen.grab(rect), rect, self.own_rects), rect
 
     # ---- session
     def start_or_stop(self):
@@ -480,6 +507,16 @@ class App:
 
     # ---- live updates
     def _tick(self):
+        rects = []
+        for w in self._windows():
+            try:
+                if w.winfo_viewable():
+                    r = screen.window_rect(w)
+                    if r:
+                        rects.append(r)
+            except tk.TclError:
+                pass
+        self.own_rects = rects
         while True:
             try:
                 self._apply(self.q.get_nowait())
@@ -625,11 +662,15 @@ class App:
         v.mesos = s.mesos if s and s.mesos is not None else self.last_mesos
         to_level = f"To Lv. {v.level + 1}" if v.level else "To level"
         dash = "—"
+        # Rates two ways: over time spent grinding (the clock stops when no EXP comes in for a
+        # minute) and over real time since Start (town trips included).
+        grinding, real = "EXP / h · grinding", "EXP / h · real time"
+        m_grinding, m_real = "Mesos / h · grinding", "Mesos / h · real time"
         if not s:
             v.state, v.state_text = "off", "Not tracking"
-            v.tiles = [("Last 5 min", dash, None), ("EXP / hour", dash, None), (to_level, dash, None),
-                       ("This session", dash, None), ("Session time", dash, None), ("% / hour", dash, None)]
-            v.meso_tiles = [("Mesos / hour", dash, None), ("Net mesos", dash, None), ("Potions", dash, None)]
+            v.tiles = [("Last 5 min", dash, None), (grinding, dash, None), (to_level, dash, None),
+                       ("This session", dash, None), (real, dash, None), ("Time", dash, None)]
+            v.meso_tiles = [(m_grinding, dash, None), (m_real, dash, None), ("Net mesos", dash, None)]
             v.buttons = [("main", "Start", True, True), ("pause", "Pause", False, False)]
         else:
             if self.stopping:
@@ -641,22 +682,24 @@ class App:
             else:
                 v.state, v.state_text = "tracking", "Tracking"
             v.clock = fmt.clock(s.active(now))
-            pct = s.pct_rate(now)
+            pct, pct_real = s.pct_rate(now), s.pct_rate_real(now)
             eta = fmt.eta(s.tnl_seconds(now))
             v.tiles = [("Last 5 min", fmt.short(s.recent_exp(now), sign=True), None),
-                       ("EXP / hour", fmt.short(s.exp_rate(now)), None),
+                       (grinding, fmt.short(s.exp_rate(now)), None, f"{pct:.1f}%" if pct else ""),
                        (to_level, eta, None),
                        ("This session", fmt.short(s.exp_gained, sign=True), None),
-                       ("Session time", fmt.clock(s.active(now)), None),
-                       ("% / hour", f"{pct:.1f}%" if pct else dash, None)]
+                       (real, fmt.short(s.exp_rate_real(now)), None, f"{pct_real:.1f}%" if pct_real else ""),
+                       ("Time", fmt.clock(s.active(now)), None, f"of {fmt.clock(s.real(now))[:-3]}")]
             if s.mesos_start is None:
-                v.meso_tiles = [("Mesos / hour", dash, None), ("Net mesos", dash, None)]
+                v.meso_tiles = [(m_grinding, dash, None), (m_real, dash, None), ("Net mesos", dash, None)]
             else:
-                net_color = card.GOLD if s.net_mesos >= 0 else card.RED
-                v.meso_tiles = [("Mesos / hour", fmt.short(s.net_rate(now), sign=True), net_color),
-                                ("Net mesos", fmt.short(s.net_mesos, sign=True), net_color)]
-            v.meso_tiles.append(("Potions", f"-{fmt.short(s.potion_cost)}" if s.potion_cost else "0",
-                                 card.RED if s.potion_cost else None))
+                color = card.GOLD if s.net_mesos >= 0 else card.RED
+                v.meso_tiles = [(m_grinding, fmt.short(s.net_rate(now), sign=True), color),
+                                (m_real, fmt.short(s.net_rate_real(now), sign=True), color),
+                                ("Net mesos", fmt.short(s.net_mesos, sign=True), color)]
+            if s.potions:
+                v.meso_extra = (f"Potions -{fmt.short(s.potion_cost)}", card.RED) if s.potion_cost \
+                    else ("Potions 0", card.LABEL)
             main = "Finish now" if self.stopping else "Stop"
             v.buttons = [("main", main, True, True),
                          ("pause", "Resume" if s.paused else "Pause", False, True)]

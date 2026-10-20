@@ -218,8 +218,9 @@ class PotionState:
 class Session:
     """One tracked grind: EXP, mesos and potions from Start to Stop.
 
-    Active time stops counting when no EXP comes in for `idle_seconds` (in town, AFK), and
-    while paused, so the per-hour rates are for time spent actually grinding."""
+    Two clocks: grinding time stops counting when no EXP comes in for `idle_seconds` (in
+    town, AFK) and while paused, so its rates are for time spent actually grinding; real time
+    is every minute since Start except while paused, so its rates include the town trips."""
 
     def __init__(self, start_mesos=None, potions=(), idle_seconds=60, clock=time.time, exp_table=None):
         self.clock = clock
@@ -236,6 +237,8 @@ class Session:
         self._active = 0.0                  # active seconds up to self._anchor
         self._anchor = self.started
         self._events = deque()              # (active seconds when it happened, EXP gained)
+        self._paused_for = 0.0                # seconds spent paused, before the current pause
+        self._paused_at = None
 
     # ---- time
     def active(self, now=None):
@@ -252,15 +255,26 @@ class Session:
         self._active = self.active(now)
         self._anchor = now
 
+    def real(self, now=None):
+        """Real time since Start, less any time paused."""
+        end = self.ended or (self.clock() if now is None else now)
+        paused = self._paused_for + (end - self._paused_at if self._paused_at is not None else 0)
+        return max(0.0, end - self.started - paused)
+
     def pause(self, now=None):
         if not self.paused and not self.ended:
-            self._close(self.clock() if now is None else now)
+            now = self.clock() if now is None else now
+            self._close(now)
             self.paused = True
+            self._paused_at = now
 
     def resume(self, now=None):
         if self.paused and not self.ended:
+            now = self.clock() if now is None else now
             self.paused = False
-            self._anchor = self.clock() if now is None else now
+            self._anchor = now
+            self._paused_for += now - self._paused_at
+            self._paused_at = None
 
     # ---- readings
     def on_exp(self, exp, pct, now=None):
@@ -340,6 +354,17 @@ class Session:
     def net_rate(self, now=None):
         return self._per_hour(self.net_mesos, self.active(now))
 
+    # The same, over real time.
+    def exp_rate_real(self, now=None):
+        return self._per_hour(self.exp_gained, self.real(now))
+
+    def pct_rate_real(self, now=None):
+        rate, needed = self.exp_rate_real(now), self.exp.needed()
+        return rate / needed * 100 if rate is not None and needed else None
+
+    def net_rate_real(self, now=None):
+        return self._per_hour(self.net_mesos, self.real(now))
+
     def summary(self, now=None):
         now = self.clock() if now is None else now
         return {
@@ -347,10 +372,13 @@ class Session:
             "ended": self.ended,
             "total_seconds": round((self.ended or now) - self.started),
             "active_seconds": round(self.active(now)),
+            "real_seconds": round(self.real(now)),
             "exp_gained": self.exp_gained,
             "levels": self.exp.levels,
             "exp_per_hour": self.exp_rate(now),
+            "exp_per_hour_real": self.exp_rate_real(now),
             "pct_per_hour": self.pct_rate(now),
+            "pct_per_hour_real": self.pct_rate_real(now),
             "mesos_start": self.mesos_start,
             "mesos_end": self.mesos,
             "mesos_delta": self.mesos_delta,
@@ -360,4 +388,5 @@ class Session:
             "potion_cost": self.potion_cost,
             "net_mesos": self.net_mesos,
             "net_per_hour": self.net_rate(now),
+            "net_per_hour_real": self.net_rate_real(now),
         }

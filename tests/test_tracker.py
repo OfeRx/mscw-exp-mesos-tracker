@@ -192,3 +192,24 @@ def test_known_level_gives_exact_exp_needed():
     s = Session(clock=Clock(), exp_table=TABLE)
     s.on_exp(171_561, 79.21)
     assert s.exp.level() == 37
+
+
+def test_real_time_counts_town_trips_but_not_pauses():
+    c = Clock()
+    s = Session(idle_seconds=60, clock=c)
+    s.on_exp(*reading(1_000, 100_000))
+    for t in range(10, 601, 10):                # 10 minutes of kills, one every 10 seconds
+        c.t = t
+        s.on_exp(*reading(1_000 + t * 10, 100_000))
+    c.t = 1200                                  # 10 minutes in town: grinding clock stops after 1
+    s.on_exp(*reading(7_100, 100_000))
+    assert s.active() == pytest.approx(600 + 60)
+    assert s.real() == pytest.approx(1200)
+    s.pause()
+    c.t = 4800                                  # an hour paused: neither clock counts it
+    s.resume()
+    assert s.real() == pytest.approx(1200)
+    assert s.exp_rate_real() == pytest.approx(6_100 / 1200 * 3600)
+    assert s.exp_rate() > s.exp_rate_real()
+    summary = s.summary()
+    assert summary["real_seconds"] == 1200 and summary["exp_per_hour_real"] == pytest.approx(18_300)

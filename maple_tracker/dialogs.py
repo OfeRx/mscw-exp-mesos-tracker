@@ -6,7 +6,7 @@ from tkinter import messagebox
 
 from PIL import Image, ImageDraw, ImageTk
 
-from . import config, fmt, screen, share
+from . import config, fmt, share
 from .glyphs import parse_exp, parse_number, parse_typed_number
 from .screen import Screen, game_origin, make_region, region_rect
 
@@ -52,7 +52,7 @@ class Dialog(tk.Toplevel):
         self.resizable(False, False)
         self.body = tk.Frame(self, bg=BG, padx=16, pady=12)
         self.body.pack(fill="both", expand=True)
-        self.after(150, lambda: screen.exclude_from_capture(self))
+        self.after(150, lambda: app.apply_capture(self))
 
 
 # --------------------------------------------------------------------------- drawing a box
@@ -339,10 +339,12 @@ class SummaryWindow(Dialog):
         super().__init__(app, "Session summary")
         heading(self.body, "Session summary")
         rows = [
-            ("Time grinding", f"{fmt.clock(s['active_seconds'])}  (of {fmt.clock(s['total_seconds'])})"),
+            ("Time grinding", f"{fmt.clock(s['active_seconds'])}  (of "
+                              f"{fmt.clock(s.get('real_seconds', s['total_seconds']))} real time)"),
             ("EXP gained", fmt.commas(s["exp_gained"]) + (f"  (+{s['levels']} level"
                                                          f"{'s' if s['levels'] > 1 else ''})" if s["levels"] else "")),
             ("EXP / hour", fmt.commas(s["exp_per_hour"])),
+            ("EXP / hour, real time", fmt.commas(s.get("exp_per_hour_real"))),
             ("Mesos", f"{fmt.commas(s['mesos_start'])} → {fmt.commas(s['mesos_end'])}  "
                       f"({fmt.short(s['mesos_delta'], sign=True)})"),
         ]
@@ -353,6 +355,7 @@ class SummaryWindow(Dialog):
             ("Potion cost", fmt.commas(s["potion_cost"])),
             ("Net profit", fmt.commas(s["net_mesos"])),
             ("Net / hour", fmt.commas(s["net_per_hour"])),
+            ("Net / hour, real time", fmt.commas(s.get("net_per_hour_real"))),
         ]
         grid = tk.Frame(self.body, bg=BG)
         grid.pack(anchor="w")

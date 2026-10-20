@@ -43,12 +43,16 @@ def summary_text(s, live=False):
     exp = f"⭐ EXP {fmt.short(s['exp_per_hour'])}/h"
     if s.get("pct_per_hour"):
         exp += f" ({s['pct_per_hour']:.1f}%/h)"
+    if s.get("exp_per_hour_real"):
+        exp += f", {fmt.short(s['exp_per_hour_real'])}/h real time"
     exp += f" · {fmt.commas(s['exp_gained'])} gained"
     if s["levels"]:
         exp += f" · +{s['levels']} level{'s' if s['levels'] > 1 else ''}"
     lines.append(exp)
     if s["mesos_start"] is not None:
-        lines.append(f"💰 Mesos {fmt.short(s['net_per_hour'], sign=True)}/h · "
+        real = f", {fmt.short(s['net_per_hour_real'], sign=True)}/h real time" \
+            if s.get("net_per_hour_real") is not None else ""
+        lines.append(f"💰 Mesos {fmt.short(s['net_per_hour'], sign=True)}/h{real} · "
                      f"{fmt.short(s['net_mesos'], sign=True)} net")
     lines.append(f"🧪 Potions {potions_line(s)}")
     return "\n".join(lines)
@@ -74,11 +78,14 @@ def summary_card(s, live=False):
     title, big, small = _font("seguibl.ttf", 26), _font("seguisb.ttf", 30), _font("segoeui.ttf", 17)
     label = _font("segoeuib.ttf", 15)
     tiles = [("EXP / HOUR", fmt.short(s["exp_per_hour"]), BLUE,
-              f"{s['pct_per_hour']:.1f}% of a level" if s.get("pct_per_hour") else ""),
+              f"{fmt.short(s['exp_per_hour_real'])}/h in real time" if s.get("exp_per_hour_real")
+              else f"{s['pct_per_hour']:.1f}% of a level" if s.get("pct_per_hour") else ""),
              ("EXP GAINED", fmt.commas(s["exp_gained"]), BLUE,
               f"+{s['levels']} level{'s' if s['levels'] > 1 else ''}" if s["levels"] else "")]
     if s["mesos_start"] is not None:
-        tiles += [("MESOS / HOUR", fmt.short(s["net_per_hour"], sign=True), GOLD, "net, after potions"),
+        real = s.get("net_per_hour_real")
+        tiles += [("MESOS / HOUR", fmt.short(s["net_per_hour"], sign=True), GOLD,
+                   f"{fmt.short(real, sign=True)}/h in real time" if real is not None else "net, after potions"),
                   ("MESOS NET", fmt.short(s["net_mesos"], sign=True), GOLD,
                    f"{fmt.short(s['mesos_delta'], sign=True)} in your wallet")]
     rows = (len(tiles) + 1) // 2

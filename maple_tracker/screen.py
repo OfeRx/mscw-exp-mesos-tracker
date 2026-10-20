@@ -27,6 +27,7 @@ _IsIconic = _api(_user32.IsIconic, wintypes.BOOL, wintypes.HWND)
 _GetClientRect = _api(_user32.GetClientRect, wintypes.BOOL, wintypes.HWND, ctypes.POINTER(wintypes.RECT))
 _ClientToScreen = _api(_user32.ClientToScreen, wintypes.BOOL, wintypes.HWND, ctypes.POINTER(wintypes.POINT))
 _GetAncestor = _api(_user32.GetAncestor, wintypes.HWND, wintypes.HWND, wintypes.UINT)
+_GetWindowRect = _api(_user32.GetWindowRect, wintypes.BOOL, wintypes.HWND, ctypes.POINTER(wintypes.RECT))
 _SetWindowDisplayAffinity = _api(_user32.SetWindowDisplayAffinity, wintypes.BOOL, wintypes.HWND, wintypes.DWORD)
 
 WDA_EXCLUDEFROMCAPTURE = 0x11
@@ -64,14 +65,40 @@ def game_origin():
     return rect[:2] if rect else None
 
 
-def exclude_from_capture(widget):
-    """Leave one of our windows out of screenshots (Windows 10 2004+), so the overlay never
-    ends up in the boxes being read even when it's on top of them."""
+def set_capture_hidden(widget, hidden):
+    """Leave one of our windows out of screenshots, screen sharing and streams (Windows 10
+    2004+), or put it back in. Shown is the default: our own reading doesn't need hiding, since
+    it blacks our windows out of what it reads (blank_own)."""
     try:
         hwnd = _GetAncestor(widget.winfo_id(), GA_ROOT)
-        return bool(_SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE))
+        return bool(_SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE if hidden else 0))
     except Exception:
         return False
+
+
+def window_rect(widget):
+    """Where one of our windows is on screen, frame included: (x, y, w, h)."""
+    hwnd = _GetAncestor(widget.winfo_id(), GA_ROOT)
+    r = wintypes.RECT()
+    if not _GetWindowRect(hwnd, ctypes.byref(r)):
+        return None
+    return r.left, r.top, r.right - r.left, r.bottom - r.top
+
+
+def blank_own(img, frame, rects):
+    """A screenshot of `frame` (x, y, w, h on screen) with our own windows blacked out, so the
+    overlay is never read as part of the game, even when it's on top of it."""
+    if img is None or not rects:
+        return img
+    fx, fy = frame[:2]
+    out = None
+    for x, y, w, h in rects:
+        x0, y0 = max(0, x - fx), max(0, y - fy)
+        x1, y1 = min(img.shape[1], x + w - fx), min(img.shape[0], y + h - fy)
+        if x1 > x0 and y1 > y0:
+            out = img.copy() if out is None else out
+            out[y0:y1, x0:x1] = 0
+    return img if out is None else out
 
 
 # --------------------------------------------------------------------------- boxes

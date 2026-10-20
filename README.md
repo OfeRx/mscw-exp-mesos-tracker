@@ -49,6 +49,11 @@ quickslot and in the inventory. The overlay lists each one, with the count it st
 the count now, so you can check it read them right. If your UI looks different and it can't
 find the EXP bar, it offers to let you point it out by hand.
 
+The overlay shows up in screenshots, screen sharing and streams (OBS, Discord). Right-click it
+to hide it from those instead. Either way it never reads itself: it blacks its own windows out
+of what it reads, so it can sit anywhere, as long as it doesn't cover the EXP bar, quickslot or
+inventory.
+
 Your sessions, settings and anything it learned are kept in the `data/` folder, which isn't
 part of the repository.
 
@@ -67,8 +72,10 @@ quickslot shows how many you have in all). It only asks you, once, if none of th
 - **EXP gained** follows your EXP across level-ups (the rest of the old level is added) and
   deaths (the lost EXP is subtracted). A reading that doesn't fit, or a big jump, only counts
   once a later reading shows more EXP on top, so a misread digit adds nothing.
-- **Time** only counts while EXP is coming in: after 60 seconds without any (town, AFK) the
-  clock stops until the next kill. **Pause** stops it too.
+- **Time** is kept two ways, and EXP/hour and mesos/hour are shown for both. **Grinding** time
+  only counts while EXP is coming in: after 60 seconds without any (town, AFK) that clock
+  stops until the next kill. **Real time** counts every minute since Start, town trips
+  included. **Pause** stops both.
 - **Potion cost** = potions drunk × price. Drops in the count are drinks; rises are buying
   or looting. Many gone at once (more than 15 in a couple of seconds) weren't drunk: they were
   put away, sold or misread, so they aren't counted, and if they come back they cancel out.

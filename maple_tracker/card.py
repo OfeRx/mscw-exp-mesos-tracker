@@ -73,9 +73,10 @@ class View:
     level: int | None = None
     exp: int | None = None
     pct: float | None = None
-    tiles: list = field(default_factory=list)       # (label, value, colour) x 6
+    tiles: list = field(default_factory=list)       # (label, value, colour[, note]) x 6
     mesos: int | None = None              # current meso count
-    meso_tiles: list = field(default_factory=list)  # (label, value, colour) x 3
+    meso_tiles: list = field(default_factory=list)  # (label, value, colour[, note]) x 3
+    meso_extra: tuple | None = None       # (text, colour) beside the meso count: the potion bill
     details: list = field(default_factory=list)     # lines about each potion
     expanded: bool = False
     message: str = ""
@@ -208,12 +209,16 @@ def render(v: View):
     col_w = (W - 2 * pad) / 3
 
     def tiles(row, y0):
-        for i, (label, value, color) in enumerate(row):
+        for i, (label, value, color, *note) in enumerate(row):
             x = pad + i * col_w
             if i:
                 d.line((x * S, (y0 + 10) * S, x * S, (y0 + tile_row - 8) * S), fill=(78, 60, 40), width=S)
             _text(d, ((x + 10) * S, (y0 + 8) * S), label.upper(), LABEL_FONT, LABEL)
-            _text(d, ((x + 10) * S, (y0 + 24) * S), value, VALUE_FONT, color or VALUE, stroke=1)
+            base = (y0 + 48) * S
+            _text(d, ((x + 10) * S, base), value, VALUE_FONT, color or VALUE, "ls", stroke=1)
+            if note and note[0]:
+                nx = (x + 10) * S + measure.textlength(value, font=VALUE_FONT) + 5 * S
+                _text(d, (nx, base), note[0], SMALL_FONT, LABEL, "ls")
 
     tiles(v.tiles[:3], y)
     y += tile_row
@@ -225,8 +230,13 @@ def render(v: View):
     d.line((pad * S, y * S, (W - pad) * S, y * S), fill=FRAME, width=S)
     _coin(d, (pad + 10) * S, (y + 13) * S, 6 * S)
     _text(d, ((pad + 22) * S, (y + 13) * S), "MESOS & POTIONS", LABEL_FONT, TITLE, "lm")
+    right = W - pad
     if v.mesos is not None:
-        _text(d, ((W - pad) * S, (y + 13) * S), f"{v.mesos:,}", SMALL_FONT, GOLD, "rm", stroke=1)
+        count = f"{v.mesos:,}"
+        _text(d, (right * S, (y + 13) * S), count, SMALL_FONT, GOLD, "rm", stroke=1)
+        right -= measure.textlength(count, font=SMALL_FONT) / S + 14
+    if v.meso_extra:
+        _text(d, (right * S, (y + 13) * S), v.meso_extra[0], SMALL_FONT, v.meso_extra[1], "rm")
     y += meso_head
     tiles(v.meso_tiles[:3], y)
     y += tile_row + 4

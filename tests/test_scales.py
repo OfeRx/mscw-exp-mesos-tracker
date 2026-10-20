@@ -60,3 +60,14 @@ def test_whole_screen_at_other_sizes(k):
         totals[s.item.name] += read_count(img, s, exp.scale, store).value
     assert totals == {"Meat": 12, "Lemon": 206, "Red Potion": 27, "Orange Potion": 134,
                       "White Potion": 15, "Blue Potion": 50, "Orange": 89}
+
+
+def test_own_windows_are_blacked_out_of_what_is_read():
+    from maple_tracker.screen import blank_own
+    img = np.full((100, 200, 3), 255, np.uint8)
+    frame = (1000, 500, 200, 100)                     # where the screenshot was taken from
+    # The overlay sits partly over it (screen coordinates), another window elsewhere.
+    out = blank_own(img, frame, [(1150, 450, 100, 100), (0, 0, 50, 50)])
+    assert (out[0:50, 150:200] == 0).all() and (out[50:, :] == 255).all() and (out[:, :150] == 255).all()
+    assert (img == 255).all()                         # the screenshot itself is left alone
+    assert blank_own(img, frame, []) is img
