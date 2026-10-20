@@ -20,7 +20,7 @@ from .dialogs import FONT, ManualSetup, PricesDialog, RegionSelector, SummaryWin
 from .glyphs import GlyphStore, parse_exp, parse_number
 from .items import (INVENTORY, QUICKSLOT, ItemLibrary, Spot, combine, read_count,
                     teach_counts)
-from .locate import EXP_TEXT, MESOS_TEXT, Locator, game_px, gray
+from .locate import EXP_TEXT, MESOS_TEXT, Locator, game_px, gray, stretched, suggest_resolution
 from .screen import Screen, region_rect
 from .tracker import PotionState, Session, Stable, level_of
 
@@ -68,7 +68,8 @@ class Reader(threading.Thread):
         label_ = self.locator.find_exp(g)
         res["found"] = label_ is not None
         if label_:
-            self.store.set_scale(game_px(label_.scale))     # draw the fonts at this screen's size
+            res["game_px"] = game_px(label_.scale)
+            self.store.set_scale(res["game_px"])            # draw the fonts at this screen's size
         manual = jobs["manual"]
         origin = rect[:2] if game else None
         if label_:
@@ -220,6 +221,7 @@ class App:
         self.count_hint = None                 # a quickslot count to learn once the inventory opens
         self.last_record = None                # the last finished session, for Share
         self.recheck_until = 0                 # while Recheck waits for the inventory
+        self.stretched = False                 # the game picture is blurred by an in-between scale
         self.flash = None                      # (a short message, until when)
         self.teach_queue = {}               # what needs teaching: key -> (kind, image, title)
         self.skip_teach = {}                # key -> time until which it isn't asked again
@@ -583,6 +585,7 @@ class App:
         if "error" in out:
             return
         t = out["t"]
+        self.stretched = bool(out.get("game_px")) and stretched(out["game_px"])
         if out.get("found") or self.cfg["regions"].get("exp"):
             self.lost_since = None
         elif self.lost_since is None:
@@ -623,7 +626,8 @@ class App:
             key = f"potion:{name}"
             if not out.get("inventory_open"):
                 self.count_hint = name
-            elif self.session and self.unread_streak[name] >= 3 and self.skip_teach.get(key, 0) < out["t"]:
+            elif self.session and not self.stretched and self.unread_streak[name] >= 3 \
+                    and self.skip_teach.get(key, 0) < out["t"]:
                 self.teach_queue[key] = ("potion", img, f"Your {name} count shows a digit I haven't learned yet.")
         counts = combine(out["quick"], out["inventory"], out.get("inventory_unsure", []),
                          self.quick_unlinked)
@@ -642,6 +646,9 @@ class App:
 
     def _queue_teaching(self, out):
         now = out["t"]
+        if self.stretched:
+            self.teach_queue.clear()
+            return
         items = [("exp", "exp", out.get("exp"), "The EXP bar shows a character I haven't learned yet."),
                  ("mesos", "mesos", out.get("mesos"), "Your mesos show a digit I haven't learned yet.")]
         for key, kind, r, title in items:
@@ -703,7 +710,8 @@ class App:
             self.last_mesos = mesos["value"]
         v = card.View(hover=self._hover, pressed=self._pressed, expanded=self.expanded)
         if out.get("found") and not reading:
-            v.bar_note = "Found the EXP bar, but can't read it"
+            v.bar_note = "The game picture is stretched: see below" if self.stretched \
+                else "Found the EXP bar, but can't read it"
         if reading:
             v.exp, v.pct = reading
         v.level = (s.exp.level() if s else None) or (level_of(*reading, self.exp_table) if reading else None)
@@ -780,6 +788,20 @@ class App:
                 lines.append("No potions or food seen yet")
         return lines
 
+    def _stretch_advice(self, out):
+        """What to change when the game picture is stretched by an in-between amount."""
+        px, frame = out["game_px"], out.get("frame") or (0, 0, 0, 0)
+        w, h = frame[2], frame[3]
+        start = (f"The game picture is stretched {px:.2f}x to fill your {w}×{h} window, which blurs "
+                 "its numbers so they can't be read. ")
+        suggestion = suggest_resolution(w, h) if w and h else None
+        if not suggestion:
+            return start + ("In the game's Graphics settings, choose a resolution your window is a "
+                            "whole number of times bigger than (or resize the window to one).")
+        (rw, rh), times = suggestion
+        how = "your window's own size" if times == 1 else f"shown at exactly {times}x"
+        return start + f"In the game's Graphics settings, set the resolution to {rw}×{rh} ({how})."
+
     def _msg_click(self):
         if self._msg_action:
             self._msg_action()
@@ -802,6 +824,8 @@ class App:
             return "Can't find the EXP bar. Click to point it out by hand.", lambda: ManualSetup(self)
         if not out.get("found") and not self.cfg["regions"].get("exp"):
             return "Looking for the EXP bar…", None
+        if self.stretched:
+            return self._stretch_advice(out), None
         if self.stopping:
             return "Open your inventory to record your final mesos, or press Finish now.", None
         if s and s.mesos_start is None:

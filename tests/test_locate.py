@@ -7,7 +7,7 @@ import pytest
 from PIL import Image
 
 from maple_tracker.glyphs import GlyphStore, ink, parse_exp, parse_number, segment
-from maple_tracker.locate import EXP_TEXT, MESOS_TEXT, Locator, find_count, gray
+from maple_tracker.locate import EXP_TEXT, MESOS_TEXT, Locator, find_count, game_px, gray
 
 SHOT = Image.open(Path(__file__).parent / "frames" / "game_inventory.png").convert("RGB")
 
@@ -72,3 +72,24 @@ def test_potion_box_follows_the_window_size():
     x, y, w, h = loc2.from_exp(anchor)
     assert x == pytest.approx(box[0] * 0.75, abs=2) and y == pytest.approx(box[1] * 0.75, abs=2)
     assert w == pytest.approx(box[2] * 0.75, abs=2)
+
+
+def test_suggested_resolutions():
+    from maple_tracker.locate import suggest_resolution
+    assert suggest_resolution(1920, 1080) == ((1920, 1080), 1)      # a 1080p screen: no stretch
+    assert suggest_resolution(2560, 1440) == ((1280, 720), 2)       # 1440p: doubled exactly
+    assert suggest_resolution(3440, 1440) == ((1280, 720), 2)       # ultrawide 1440p
+    assert suggest_resolution(3840, 2160) == ((1920, 1080), 2)      # 4K
+    assert suggest_resolution(1366, 768) == ((1366, 768), 1)
+    assert suggest_resolution(1700, 1000) is None
+
+
+def test_a_stretched_game_is_recognised():
+    """A friend's screen: the game set to 1366x768, stretched to fill a 1920x1080 screen
+    (1.41x, blurred). The EXP label is still found, and the stretch is noticed."""
+    from maple_tracker.locate import EXP_LABEL, SCALES, search, stretched
+    crop = np.asarray(Image.open(Path(__file__).parent / "frames" / "stretched_1366x768_in_1920x1080_exp_bar.png").convert("RGB"))
+    found = search(gray(crop), EXP_LABEL, SCALES)
+    px = game_px(found.scale)
+    assert 1.3 < px < 1.55 and stretched(px)      # about 1080 / 768 (no LV label here)
+    assert not stretched(game_px(1.7196))                             # this machine's 2x screen

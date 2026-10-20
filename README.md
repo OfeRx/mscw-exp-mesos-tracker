@@ -34,13 +34,22 @@ the EXP table, from NiaMeowDB (a few seconds; see *Game data* below). It only ru
 Play the game in **windowed or borderless** mode: exclusive fullscreen hides other windows, so
 the overlay can't show.
 
-**Window size:** the game enlarges its interface to fit the window. The tracker reads it
-reliably when that's a whole number of times the game's own size: a game area 1280×720 (1x),
-2560×1440 (2x, a 1440p screen) or 3840×2160 (3x, 4K). At in-between sizes, such as a 1080p
-screen (1.5x), it may not read the numbers yet: until that's supported, a 1280×720 window works.
-If the overlay says it found the EXP bar but can't read it, right-click it and choose **Save
-diagnostics**, and send the zip it saves (just the EXP bar, meso field and quickslot: no chat or
-names).
+**The game's resolution:** the game draws its picture at the resolution chosen in its Graphics
+settings and stretches it to fill the window. When the window is a whole number of times that
+size, every pixel stays sharp and the tracker reads the numbers; stretched by an in-between
+amount, they come out blurred and it can't. So pick a resolution that fits your window evenly:
+
+| Your window / screen | Game resolution | Drawn at |
+|---|---|---|
+| 1920×1080 | 1920×1080 | 1x |
+| 2560×1440 (or 3440×1440 ultrawide) | 1280×720 | 2x |
+| 3840×2160 (4K) | 1920×1080 | 2x |
+| 1366×768 | 1366×768 | 1x |
+
+For example 1366×768 on a 1080p screen is stretched 1.41x and can't be read. The tracker
+notices a stretched picture and says which resolution to pick. If the numbers still aren't read,
+right-click the overlay and choose **Save diagnostics**, and send the zip it saves (just the EXP
+bar, meso field and quickslot: no chat or names).
 
 ## Using it
 

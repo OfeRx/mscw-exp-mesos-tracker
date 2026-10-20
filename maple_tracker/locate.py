@@ -44,6 +44,28 @@ def game_px(scale):
     step = round(px * 2) / 2
     return step if step and abs(px - step) < 0.08 else px
 
+# The game's own resolutions (its Graphics settings), as far as known. It draws its picture at
+# the chosen one and stretches it to fill the window: by a whole number (1280x720 in a 2560x1440
+# window: 2x, every pixel a sharp 2x2 block) or not (1366x768 in a 1920x1080 window: 1.41x,
+# blurred), and blurred numbers can't be read reliably.
+RESOLUTIONS = [(1920, 1080), (1366, 768), (1280, 720), (1024, 768), (800, 600)]
+
+
+def stretched(px):
+    """Whether the game picture is enlarged by an in-between amount (and so blurred)."""
+    return abs(px - round(px)) > 0.05
+
+
+def suggest_resolution(window_w, window_h):
+    """((width, height), times) for the biggest game resolution a window of this size shows at
+    a whole number of times its size, or None."""
+    for w, h in RESOLUTIONS:
+        times = window_h / h
+        if round(times) >= 1 and abs(times - round(times)) < 0.01 and w * round(times) <= window_w + 1:
+            return (w, h), round(times)
+    return None
+
+
 SCALES = [0.5 * 1.08 ** i for i in range(25)]      # 0.5x .. 3.2x
 MIN_SCORE = 0.65
 
