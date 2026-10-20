@@ -56,8 +56,8 @@ def summary_text(s, live=False):
 
 # --------------------------------------------------------------------------- the picture
 
-BG, PANEL, FG, MUTED = (27, 31, 39), (36, 42, 53), (232, 232, 232), (154, 163, 178)
-GOLD, GREEN, BLUE, RED = (242, 196, 109), (123, 216, 143), (108, 196, 255), (255, 122, 122)
+BG, PANEL, FG, MUTED = (31, 24, 17), (54, 41, 29), (252, 248, 240), (196, 172, 138)
+GOLD, GREEN, BLUE, RED = (255, 206, 92), (150, 232, 120), (252, 248, 240), (255, 128, 112)
 FONTS = Path(r"C:\Windows\Fonts")
 
 
@@ -86,7 +86,12 @@ def summary_card(s, live=False):
     h = pad + 40 + 26 + rows * (tile_h + gap) + 70 + pad
     img = Image.new("RGB", (w, h), BG)
     d = ImageDraw.Draw(img)
-    d.text((pad, pad), "MapleStory Classic grind" + (" (so far)" if live else ""), font=title, fill=FG)
+    # A coin by the title, like the overlay's header.
+    cy, r = pad + 17, 11
+    d.ellipse((pad, cy - r, pad + 2 * r, cy + r), fill=(240, 176, 48), outline=(122, 76, 16), width=2)
+    d.ellipse((pad + 5, cy - r + 5, pad + 2 * r - 5, cy + r - 5), outline=(255, 226, 140), width=2)
+    d.text((pad + 2 * r + 10, pad), "MapleStory Classic grind" + (" (so far)" if live else ""),
+           font=title, fill=(244, 210, 135))
     d.text((pad, pad + 40), f"{_when(s.get('started'))}  ·  {_hours(s['active_seconds'])} grinding",
            font=small, fill=MUTED)
     y = pad + 40 + 34
@@ -111,6 +116,9 @@ def summary_card(s, live=False):
         d = ImageDraw.Draw(img)
         h = bottom
     d.text((w - pad, h - 12), "Maple Tracker", font=label, fill=MUTED, anchor="rs")
+    # The overlay's gold frame.
+    d.rectangle((0, 0, w - 1, h - 1), outline=(139, 104, 55), width=3)
+    d.rectangle((4, 4, w - 5, h - 5), outline=(70, 54, 36), width=1)
     return img
 
 

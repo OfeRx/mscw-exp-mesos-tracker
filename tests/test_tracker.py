@@ -170,3 +170,25 @@ def test_potions_gone_all_at_once_were_not_drunk():
     assert blue.used == 2 and blue.cost == 440
     blue.set(165)                                    # bought 100
     assert blue.added == 100
+
+
+# A few rows of the game's EXP table (level: EXP to next level), from NiaMeowDB.
+TABLE = {36: 194_832, 37: 216_600, 38: 240_500, 39: 266_682, 59: 1_147_132, 60: 1_209_994, 61: 1_276_301}
+
+
+def test_level_from_one_reading():
+    from maple_tracker.tracker import level_of
+    assert level_of(171_561, 79.21, TABLE) == 37
+    assert level_of(19_590, 8.15, TABLE) == 38            # just after levelling up
+    assert level_of(144_355, 11.93, TABLE) == 60
+    assert level_of(12, 0.0, TABLE) is None               # an empty bar says nothing
+    assert level_of(171_561, 79.21, {}) is None           # no table yet
+
+
+def test_known_level_gives_exact_exp_needed():
+    t = ExpTracker(TABLE)
+    t.update(171_561, 79.21)
+    assert t.level() == 37 and t.needed() == 216_600 and t.remaining() == 216_600 - 171_561
+    s = Session(clock=Clock(), exp_table=TABLE)
+    s.on_exp(171_561, 79.21)
+    assert s.exp.level() == 37

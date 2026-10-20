@@ -11,15 +11,14 @@ from tkinter import messagebox
 
 from PIL import Image, ImageTk
 
-from . import config, fmt, itemdata, screen, share
-from .dialogs import (BG, BOLD, FONT, GOOD, MUTED, PANEL, WARN, FG, ManualSetup, PricesDialog,
-                      RegionSelector, SummaryWindow, button, label)
+from . import card, config, fmt, itemdata, screen, share
+from .dialogs import FONT, ManualSetup, PricesDialog, RegionSelector, SummaryWindow
 from .glyphs import GlyphStore, parse_exp, parse_number
 from .items import (INVENTORY, QUICKSLOT, ItemLibrary, Spot, combine, read_count,
                     teach_counts)
 from .locate import EXP_TEXT, MESOS_TEXT, Locator, game_px, gray
 from .screen import Screen, region_rect
-from .tracker import PotionState, Session, Stable
+from .tracker import PotionState, Session, Stable, level_of
 
 LOST_AFTER = 15        # seconds without finding the EXP bar before offering to set it up by hand
 
@@ -226,7 +225,9 @@ class App:
         self.scanner = ItemScanner(self.store, self.library, self.item_q)
         self.scanner.start()
         self.item_download = None           # None, "running", "done" or the error
-        if not itemdata.available():
+        self.exp_table = itemdata.exp_table()  # level -> EXP to next level, for the level badge
+        self.last_mesos = None
+        if not itemdata.available() or not self.exp_table:
             self.download_items()
         self._build()
         self.root.after(250, self._tick)
@@ -256,90 +257,94 @@ class App:
         r = self.root
         r.overrideredirect(True)
         r.attributes("-topmost", True)
+        r.configure(bg=card.KEY_HEX)
+        r.attributes("-transparentcolor", card.KEY_HEX)     # the card's rounded corners
         r.attributes("-alpha", self.cfg["alpha"])
-        r.configure(bg=BG)
         pos = self.cfg.get("overlay_pos") or [40, 40]
         r.geometry(f"+{pos[0]}+{pos[1]}")
-        f = tk.Frame(r, bg=BG, padx=10, pady=8, highlightthickness=1, highlightbackground="#333a47")
-        f.pack()
-
-        top = tk.Frame(f, bg=BG)
-        top.pack(fill="x")
-        self.l_state = label(top, "● Not tracking", fg=MUTED, font=BOLD)
-        self.l_state.pack(side="left")
-        close = label(top, "  ✕", fg=MUTED, cursor="hand2")
-        close.pack(side="right")
-        close.bind("<Button-1>", lambda e: self.quit())
-        self.l_time = label(top, "", font=BOLD)
-        self.l_time.pack(side="right")
-
-        grid = tk.Frame(f, bg=BG)
-        grid.pack(fill="x", pady=(6, 4))
-        self.values = {}
-        for i, key in enumerate(("EXP", "5 min", "Level in", "Mesos", "Potions")):
-            label(grid, key, fg=MUTED).grid(row=i, column=0, sticky="w", padx=(0, 12))
-            self.values[key] = label(grid, "—")
-            self.values[key].grid(row=i, column=1, sticky="w")
-
-        # Each potion's count, as read: what it started at and what it is now.
-        self.l_counts = label(f, "", fg=MUTED)
-        self.l_counts.pack(anchor="w", pady=(0, 4))
-
-        # A message and, when needed, a number to teach: shown only when there's something.
-        extra = tk.Frame(f, bg=BG)
-        extra.pack(fill="x")
-        tk.Frame(extra, bg=BG, height=0).pack()      # so it shrinks back when both are hidden
-        self.l_msg = label(extra, "", fg=WARN, wraplength=270, cursor="hand2")
-        self.l_msg.bind("<Button-1>", lambda e: self._msg_click())
+        self.card = tk.Label(r, bd=0, bg=card.KEY_HEX, highlightthickness=0)
+        self.card.pack()
+        self._shown, self._hits = None, {}
+        self._hover = self._pressed = self._drag_from = None
         self._msg_action = None
+        self.expanded = bool(self.cfg.get("details_open"))
+        self.card.bind("<ButtonPress-1>", self._press)
+        self.card.bind("<B1-Motion>", self._drag)
+        self.card.bind("<ButtonRelease-1>", self._release)
+        self.card.bind("<Motion>", self._move)
+        self.card.bind("<Leave>", lambda e: self._set_hover(None))
+        self.actions = {"main": self.start_or_stop, "pause": self.toggle_pause, "recheck": self.recheck,
+                        "prices": lambda: PricesDialog(self), "share": self.share, "close": self.quit,
+                        "details": self._toggle_details, "message": self._msg_click}
 
-        # Teaching, inline: the unread number, a box to type it in.
-        self.teach = tk.Frame(extra, bg=BG)
-        self.teach_title = label(self.teach, "", fg=WARN)
+        # Teaching, inline: the unread number and a box to type it in. It needs a real text
+        # box, so it's widgets under the card rather than part of the picture.
+        bg, fg, gold = "#2a2017", "#fcf8f0", "#ffc45c"
+        self.teach = tk.Frame(r, bg=bg, padx=12, pady=8, highlightthickness=2,
+                              highlightbackground="#8b6837")
+        self.teach_title = tk.Label(self.teach, text="", bg=bg, fg=gold, font=FONT, wraplength=440,
+                                    justify="left")
         self.teach_title.pack(anchor="w")
-        row = tk.Frame(self.teach, bg=BG)
-        row.pack(anchor="w", pady=(2, 0))
+        row = tk.Frame(self.teach, bg=bg)
+        row.pack(anchor="w", pady=(4, 0))
         self.teach_img = tk.Label(row, bg="#000")
         self.teach_img.pack(side="left")
         self.teach_var = tk.StringVar()
-        entry = tk.Entry(row, textvariable=self.teach_var, width=14, font=FONT, bg=PANEL, fg=FG,
-                         insertbackground=FG, relief="flat", highlightthickness=1,
-                         highlightbackground="#3b4558")
+        entry = tk.Entry(row, textvariable=self.teach_var, width=14, font=FONT, bg="#1a130d", fg=fg,
+                         insertbackground=fg, relief="flat", highlightthickness=1,
+                         highlightbackground="#8b6837")
         entry.pack(side="left", padx=6)
         entry.bind("<Return>", lambda e: self._teach_ok())
-        button(row, "OK", self._teach_ok).pack(side="left")
-        button(row, "✕", self._teach_skip, width=2).pack(side="left", padx=(4, 0))
+        for text, command in (("OK", self._teach_ok), ("✕", self._teach_skip)):
+            tk.Button(row, text=text, command=command, bg="#5c462f", fg=fg, activebackground="#6e5639",
+                      activeforeground=fg, relief="flat", padx=10, pady=2, font=FONT,
+                      cursor="hand2").pack(side="left", padx=(0, 4))
         self.teach_entry = entry
         self._teaching = None
-
-        buttons = tk.Frame(f, bg=BG)
-        buttons.pack(fill="x", pady=(4, 0))
-        self.b_main = button(buttons, "Start", self.start_or_stop)
-        self.b_main.pack(side="left")
-        self.b_pause = button(buttons, "Pause", self.toggle_pause, state="disabled")
-        self.b_pause.pack(side="left", padx=4)
-        button(buttons, "Prices", lambda: PricesDialog(self)).pack(side="left")
-        button(buttons, "Share", self.share).pack(side="left", padx=(4, 0))
-        button(buttons, "Recheck", self.recheck).pack(side="left", padx=(4, 0))
-        self.buttons = buttons
-
-        for w in (f, top, grid, self.l_state, self.l_time, *grid.winfo_children()):
-            w.bind("<ButtonPress-1>", self._drag_start, add="+")
-            w.bind("<B1-Motion>", self._drag, add="+")
-            w.bind("<ButtonRelease-1>", self._drag_end, add="+")
         r.after(200, lambda: screen.exclude_from_capture(r))
 
-    def _drag_start(self, e):
-        self._drag_from = (e.x_root - self.root.winfo_x(), e.y_root - self.root.winfo_y())
+    # Clicks on the card: a button acts when released over it; anywhere else drags the window.
+    def _press(self, e):
+        name = card.hit(self._hits, e.x, e.y)
+        if name:
+            self._pressed = name
+            self._redraw()
+        else:
+            self._drag_from = (e.x_root - self.root.winfo_x(), e.y_root - self.root.winfo_y())
 
     def _drag(self, e):
-        if getattr(self, "_drag_from", None):
+        if self._drag_from:
             self.root.geometry(f"+{e.x_root - self._drag_from[0]}+{e.y_root - self._drag_from[1]}")
 
-    def _drag_end(self, e):
-        self._drag_from = None
-        self.cfg["overlay_pos"] = [self.root.winfo_x(), self.root.winfo_y()]
+    def _release(self, e):
+        if self._pressed:
+            name, self._pressed = self._pressed, None
+            self._redraw()
+            if card.hit(self._hits, e.x, e.y) == name and name in self.actions:
+                self.actions[name]()
+            return
+        if self._drag_from:
+            self._drag_from = None
+            self.cfg["overlay_pos"] = [self.root.winfo_x(), self.root.winfo_y()]
+            config.save(self.cfg)
+
+    def _move(self, e):
+        self._set_hover(card.hit(self._hits, e.x, e.y))
+
+    def _set_hover(self, name):
+        if name != self._hover:
+            self._hover = name
+            self.card.config(cursor="hand2" if name else "fleur")
+            self._redraw()
+
+    def _toggle_details(self):
+        self.expanded = not self.expanded
+        self.cfg["details_open"] = self.expanded
         config.save(self.cfg)
+        self._redraw()
+
+    def _redraw(self):
+        self._render(time.time())
 
     def _windows(self):
         return [self.root] + [w for w in self.root.winfo_children() if isinstance(w, tk.Toplevel)]
@@ -379,7 +384,8 @@ class App:
         # Potions and food already seen start from their current counts; others join the
         # session the first time they're seen.
         potions = [PotionState(name, self.price(name), start=n) for name, n in self.item_counts.items()]
-        self.session = Session(None, potions, idle_seconds=self.cfg["idle_seconds"])
+        self.session = Session(None, potions, idle_seconds=self.cfg["idle_seconds"],
+                               exp_table=self.exp_table)
         self.stopping = False
         self.mesos_seen = Stable()
         self.items_seen = {name: Stable(n) for name, n in self.item_counts.items()}
@@ -419,8 +425,14 @@ class App:
 
         def work():
             try:
-                itemdata.download()
-                self.library.reload()
+                if not itemdata.available():
+                    itemdata.download()
+                    self.library.reload()
+                if not self.exp_table:
+                    itemdata.download_exp_table()
+                    self.exp_table = itemdata.exp_table()
+                    if self.session:
+                        self.session.exp.table = self.exp_table
                 self.item_download = "done"
             except Exception as e:
                 self.item_download = f"{type(e).__name__}: {e}"
@@ -591,54 +603,71 @@ class App:
             self._teaching = None
 
     def _render(self, now):
-        s, v, out = self.session, self.values, self.latest
-        exp = out.get("exp")
-        if not s:
-            self.l_state.config(text="● Not tracking", fg=MUTED)
-            self.l_time.config(text="")
-            v["EXP"].config(text=f"{exp['value'][0]:,} ({exp['value'][1]:.2f}%)" if exp and exp["value"] else "—")
-            mesos = out.get("mesos")
-            v["Mesos"].config(text=f"{mesos['value']:,}" if mesos and mesos["value"] is not None else "—")
-            for key in ("5 min", "Level in", "Potions"):
-                v[key].config(text="—")
-            self.b_main.config(text="Start")
-            self.b_pause.config(state="disabled", text="Pause")
-        else:
-            if self.stopping:
-                self.l_state.config(text="● Finishing", fg=WARN)
-            elif s.paused:
-                self.l_state.config(text="● Paused", fg=WARN)
-            elif s.idle(now):
-                self.l_state.config(text="● Idle", fg=WARN)
-            else:
-                self.l_state.config(text="● Tracking", fg=GOOD)
-            self.l_time.config(text=fmt.clock(s.active(now)))
-            pct = s.pct_rate(now)
-            v["EXP"].config(text=f"{fmt.short(s.exp_rate(now))}/h" + (f" · {pct:.2f}%/h" if pct else ""))
-            v["5 min"].config(text=f"{fmt.short(s.rolling_rate(now))}/h")
-            lv = f" · +{s.exp.levels} lv" if s.exp.levels else ""
-            v["Level in"].config(text=fmt.eta(s.tnl_seconds(now)) + lv)
-            if s.mesos_start is None:
-                v["Mesos"].config(text="—")
-            else:
-                v["Mesos"].config(text=f"{fmt.short(s.net_rate(now), sign=True)}/h · "
-                                       f"{fmt.short(s.net_mesos, sign=True)} net")
-            used = ", ".join(f"{p.name.replace(' Potion', '')} {p.used}" for p in s.potions.values() if p.used)
-            cost = f"-{fmt.short(s.potion_cost)}" if s.potion_cost else "0"
-            v["Potions"].config(text=(cost + (f" ({used})" if used else "")) if s.potions else "—")
-            self.b_main.config(text="Finish now" if self.stopping else "Stop")
-            self.b_pause.config(state="normal", text="Resume" if s.paused else "Pause")
-        self._render_counts(s, out)
-        msg, self._msg_action = self._message(out, now)
-        self.l_msg.config(text=msg, cursor="hand2" if self._msg_action else "")
-        if msg and not self.l_msg.winfo_ismapped():
-            kw = {"before": self.teach} if self.teach.winfo_ismapped() else {}
-            self.l_msg.pack(anchor="w", **kw)
-        elif not msg and self.l_msg.winfo_ismapped():
-            self.l_msg.pack_forget()
+        v = self._view(now)
+        if v != self._shown:                    # only draw when something changed
+            img, self._hits = card.render(v)
+            self._card_photo = ImageTk.PhotoImage(img)
+            self.card.config(image=self._card_photo)
+            self._shown = v
         self._show_teaching()
 
-    def _render_counts(self, s, out):
+    def _view(self, now):
+        s, out = self.session, self.latest
+        exp = out.get("exp")
+        reading = exp["value"] if exp and exp["value"] else None
+        mesos = out.get("mesos")
+        if mesos and mesos["value"] is not None:
+            self.last_mesos = mesos["value"]
+        v = card.View(hover=self._hover, pressed=self._pressed, expanded=self.expanded)
+        if reading:
+            v.exp, v.pct = reading
+        v.level = (s.exp.level() if s else None) or (level_of(*reading, self.exp_table) if reading else None)
+        v.mesos = s.mesos if s and s.mesos is not None else self.last_mesos
+        to_level = f"To Lv. {v.level + 1}" if v.level else "To level"
+        dash = "—"
+        if not s:
+            v.state, v.state_text = "off", "Not tracking"
+            v.tiles = [("Last 5 min", dash, None), ("EXP / hour", dash, None), (to_level, dash, None),
+                       ("This session", dash, None), ("Session time", dash, None), ("% / hour", dash, None)]
+            v.meso_tiles = [("Mesos / hour", dash, None), ("Net mesos", dash, None), ("Potions", dash, None)]
+            v.buttons = [("main", "Start", True, True), ("pause", "Pause", False, False)]
+        else:
+            if self.stopping:
+                v.state, v.state_text = "finishing", "Finishing"
+            elif s.paused:
+                v.state, v.state_text = "paused", "Paused"
+            elif s.idle(now):
+                v.state, v.state_text = "idle", "Idle"
+            else:
+                v.state, v.state_text = "tracking", "Tracking"
+            v.clock = fmt.clock(s.active(now))
+            pct = s.pct_rate(now)
+            eta = fmt.eta(s.tnl_seconds(now))
+            v.tiles = [("Last 5 min", fmt.short(s.recent_exp(now), sign=True), None),
+                       ("EXP / hour", fmt.short(s.exp_rate(now)), None),
+                       (to_level, eta, None),
+                       ("This session", fmt.short(s.exp_gained, sign=True), None),
+                       ("Session time", fmt.clock(s.active(now)), None),
+                       ("% / hour", f"{pct:.1f}%" if pct else dash, None)]
+            if s.mesos_start is None:
+                v.meso_tiles = [("Mesos / hour", dash, None), ("Net mesos", dash, None)]
+            else:
+                net_color = card.GOLD if s.net_mesos >= 0 else card.RED
+                v.meso_tiles = [("Mesos / hour", fmt.short(s.net_rate(now), sign=True), net_color),
+                                ("Net mesos", fmt.short(s.net_mesos, sign=True), net_color)]
+            v.meso_tiles.append(("Potions", f"-{fmt.short(s.potion_cost)}" if s.potion_cost else "0",
+                                 card.RED if s.potion_cost else None))
+            main = "Finish now" if self.stopping else "Stop"
+            v.buttons = [("main", main, True, True),
+                         ("pause", "Resume" if s.paused else "Pause", False, True)]
+        v.buttons += [("recheck", "Recheck", False, True), ("prices", "Prices", False, True),
+                      ("share", "Share", False, True)]
+        v.details = self._detail_lines(s)
+        v.message, self._msg_action = self._message(out, now)
+        v.message_clickable = self._msg_action is not None
+        return v
+
+    def _detail_lines(self, s):
         """One line per potion, so it's easy to check the counts are read right."""
         lines = []
         if s:
@@ -658,11 +687,7 @@ class App:
                 lines.append(f"{name}  {n}")
             if not lines and self.items_latest.get("t"):
                 lines.append("No potions or food seen yet")
-        self.l_counts.config(text="\n".join(lines))
-        if lines and not self.l_counts.winfo_ismapped():
-            self.l_counts.pack(anchor="w", pady=(0, 4), after=self.l_counts.master.winfo_children()[1])
-        elif not lines and self.l_counts.winfo_ismapped():
-            self.l_counts.pack_forget()
+        return lines
 
     def _msg_click(self):
         if self._msg_action:
@@ -674,7 +699,7 @@ class App:
         if self.flash and now < self.flash[1]:
             return self.flash[0], None
         if self.item_download == "running":
-            return "Downloading potion and food data from NiaMeowDB…", None
+            return "Downloading potion, food and EXP table data from NiaMeowDB…", None
         if self.item_download not in (None, "running", "done"):
             return ("Couldn't download potion data (no internet?). Click to try again.",
                     self.download_items)

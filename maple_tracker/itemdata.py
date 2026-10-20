@@ -1,12 +1,14 @@
-"""The potion and food list, icons and prices, downloaded from NiaMeowDB on first run.
+"""The potion and food list, icons and prices, and the EXP table, downloaded from NiaMeowDB on
+first run.
 
-Each copy of the tracker fetches these for itself into data/items/ rather than shipping them:
+Each copy of the tracker fetches these for itself into data/ rather than shipping them:
 NiaMeowDB (https://meowdb.com) asks to be contacted before its data is republished, and the
 icons are Nexon's. Item names, icons and NPC sell-back prices come from its item database;
 NPC shop prices from its NPC shop pages (below, as of 2026-10-18), credited in the README."""
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.request
 from io import BytesIO
@@ -20,6 +22,8 @@ FOLDER = config.DATA / "items"
 LIST_URL = ("https://meowdb.com/msclassic/api/items?type=Use&subtype=Potion%2CFood&ossyria=1"
             "&page={page}&limit=25&locale=en")
 ICON_URL = "https://meowdb.com/msclassic/api/assets/icons/{id}"
+EXP_URL = "https://meowdb.com/msclassic/guides/exp-table-level-1-to-100"
+EXP_FILE = config.DATA / "exp_table.json"
 HEADERS = {"User-Agent": "MapleTracker (personal EXP and meso tracker)"}
 
 # What NPC shops charge, from NiaMeowDB's NPC shop pages: the Victoria Road grocers and
@@ -76,6 +80,36 @@ def download(folder: Path = FOLDER, progress=None):
     return len(items)
 
 
+def exp_table(path: Path = EXP_FILE):
+    """level -> EXP to the next level, or {} until it's been downloaded."""
+    if not path.exists():
+        return {}
+    return {int(level): need for level, need in json.loads(path.read_text("utf-8")).items()}
+
+
+def parse_exp_table(html):
+    """The rows of the EXP table page: level, EXP to next level, ..."""
+    table = {}
+    for row in re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.S):
+        cells = [re.sub(r"<[^>]+>", "", c).strip()
+                 for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", row, re.S)]
+        if len(cells) >= 2 and cells[0].isdigit() and re.fullmatch(r"[\d,]+", cells[1]):
+            table[int(cells[0])] = int(cells[1].replace(",", ""))
+    return table
+
+
+def download_exp_table(path: Path = EXP_FILE):
+    """Fetch the EXP table and save it. Returns how many levels it has."""
+    table = parse_exp_table(_get(EXP_URL).decode("utf-8", "replace"))
+    levels = sorted(table)
+    if len(levels) < 50 or any(table[a] > table[b] for a, b in zip(levels, levels[1:])):
+        raise ValueError("the EXP table page didn't look as expected")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(table), "utf-8")
+    return len(table)
+
+
 if __name__ == "__main__":
     n = download(progress=lambda i, total: print(f"\r{i}/{total}", end=""))
     print(f"\nSaved {n} items to {FOLDER}")
+    print(f"Saved the EXP table for {download_exp_table()} levels to {EXP_FILE}")

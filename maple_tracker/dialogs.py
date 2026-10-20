@@ -10,19 +10,19 @@ from . import config, fmt, screen, share
 from .glyphs import parse_exp, parse_number, parse_typed_number
 from .screen import Screen, game_origin, make_region, region_rect
 
-BG = "#1b1f27"
-PANEL = "#242a35"
-FG = "#e8e8e8"
-MUTED = "#9aa3b2"
+BG = "#241b13"
+PANEL = "#1a130d"
+FG = "#fcf8f0"
+MUTED = "#c4ac8a"
 GOOD = "#7bd88f"
-WARN = "#f2c46d"
+WARN = "#ffc45c"
 BAD = "#ff7a7a"
 FONT = ("Segoe UI", 10)
 BOLD = ("Segoe UI", 10, "bold")
 
 
 def button(parent, text, command, **kw):
-    return tk.Button(parent, text=text, command=command, bg="#2f3747", fg=FG, activebackground="#3b4558",
+    return tk.Button(parent, text=text, command=command, bg="#5c462f", fg=FG, activebackground="#6e5639",
                      activeforeground=FG, relief="flat", padx=10, pady=3, font=FONT, cursor="hand2", **kw)
 
 
@@ -129,12 +129,12 @@ class RegionPanel(tk.Frame):
         self.size = (150, 34) if compact else (440, 70)
 
         self.canvas = tk.Canvas(self, width=self.size[0], height=self.size[1], bg="#000",
-                                highlightthickness=1, highlightbackground="#3b4558")
+                                highlightthickness=1, highlightbackground="#8b6837")
         self.draw_btn = button(self, "Draw box", self.select)
         self.var = tk.StringVar()
         self.entry = tk.Entry(self, textvariable=self.var, width=14 if compact else 24, font=FONT,
                               bg=PANEL, fg=FG, insertbackground=FG, relief="flat",
-                              highlightthickness=1, highlightbackground="#3b4558")
+                              highlightthickness=1, highlightbackground="#8b6837")
         self.entry.bind("<Key>", lambda e: setattr(self, "edited", True))
         self.status = label(self, "", fg=MUTED, wraplength=150 if compact else 440)
         if compact:
@@ -307,7 +307,7 @@ class PricesDialog(Dialog):
 
 def entry(parent, var, width):
     return tk.Entry(parent, textvariable=var, width=width, font=FONT, bg=PANEL, fg=FG, insertbackground=FG,
-                    relief="flat", highlightthickness=1, highlightbackground="#3b4558")
+                    relief="flat", highlightthickness=1, highlightbackground="#8b6837")
 
 
 # --------------------------------------------------------------------------- by hand

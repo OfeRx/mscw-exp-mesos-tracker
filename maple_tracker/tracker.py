@@ -25,6 +25,18 @@ def exp_bounds(exp, pct):
     return lo, hi
 
 
+def match_level(table, lo, hi):
+    """The level whose EXP to next level lies between lo and hi, if exactly one does. Each
+    level needs about 10% more than the last, so one reading's % pins it down."""
+    hits = [level for level, need in table.items() if lo <= need <= hi]
+    return hits[0] if len(hits) == 1 else None
+
+
+def level_of(exp, pct, table):
+    """The level for one reading of the EXP bar, if the EXP table is known."""
+    return match_level(table, *exp_bounds(exp, pct)) if table and pct > 0 else None
+
+
 @dataclass
 class _Reading:
     exp: int
@@ -46,7 +58,8 @@ class ExpTracker:
     on top of it: the same reading again proves nothing, since a misread repeats for as long
     as the screen doesn't change."""
 
-    def __init__(self):
+    def __init__(self, table=None):
+        self.table = table or {}             # level -> EXP to next level, when known
         self.cur: _Reading | None = None
         self.lo, self.hi = 0.0, math.inf     # EXP needed for the current level is in here
         self.levels = 0
@@ -60,8 +73,18 @@ class ExpTracker:
     def pct(self):
         return self.cur.pct if self.cur else None
 
+    def level(self):
+        """The current level, worked out from the EXP table, or None."""
+        if self.cur is None or not self.table:
+            return None
+        return match_level(self.table, self.lo, self.hi)
+
     def needed(self):
-        """EXP needed for the current level (estimated), or None if not known yet."""
+        """EXP needed for the current level: exact from the EXP table once the level is known,
+        else estimated from the %, or None if not known yet."""
+        level = self.level()
+        if level:
+            return self.table[level]
         if self.cur is None or math.isinf(self.hi):
             return None
         return (self.lo + self.hi) / 2
@@ -198,12 +221,12 @@ class Session:
     Active time stops counting when no EXP comes in for `idle_seconds` (in town, AFK), and
     while paused, so the per-hour rates are for time spent actually grinding."""
 
-    def __init__(self, start_mesos=None, potions=(), idle_seconds=60, clock=time.time):
+    def __init__(self, start_mesos=None, potions=(), idle_seconds=60, clock=time.time, exp_table=None):
         self.clock = clock
         self.started = clock()
         self.ended = None
         self.idle_seconds = idle_seconds
-        self.exp = ExpTracker()
+        self.exp = ExpTracker(exp_table)
         self.exp_gained = 0
         self.mesos_start = start_mesos          # None until the inventory has been seen
         self.mesos = start_mesos
@@ -277,6 +300,11 @@ class Session:
 
     def exp_rate(self, now=None):
         return self._per_hour(self.exp_gained, self.active(now))
+
+    def recent_exp(self, now=None):
+        """EXP gained in the last 5 minutes of grinding."""
+        a = self.active(now)
+        return sum(g for t, g in self._events if a - t <= ROLLING_SECONDS)
 
     def rolling_rate(self, now=None):
         a = self.active(now)

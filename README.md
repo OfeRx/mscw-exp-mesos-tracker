@@ -1,9 +1,10 @@
 # MapleStory Classic World EXP & meso tracker
 
-A small always-on-top overlay for MapleStory Classic World that shows EXP/hour, the
-last-5-minutes rate, time to level, net mesos/hour and what your potions cost. Each session is
-saved when you stop, and you can copy a summary (text or a picture) to paste into Discord or
-WhatsApp.
+A small always-on-top overlay for MapleStory Classic World, styled after the game's own
+windows: your level in orange number boxes, an EXP bar, and big numbers for the EXP gained in
+the last 5 minutes, EXP/hour, time to the next level, this session's EXP, mesos/hour, net mesos
+and what your potions cost. Each session is saved when you stop, and you can copy a summary
+(text or a picture) to paste into Discord or WhatsApp.
 
 ## How it reads the game
 
@@ -20,8 +21,8 @@ tick "Add python.exe to PATH" when installing).
 1. Get the code: `git clone` this repository, or download it as a ZIP and unzip it.
 2. Double-click `run.bat`. The first time, it sets up its own Python environment (a minute or
    two), then starts the tracker.
-3. On its first start the tracker downloads the potion and food list and icons from
-   NiaMeowDB (a few seconds; see *Item data* below).
+3. On its first start the tracker downloads the potion and food list and icons, and the EXP
+   table, from NiaMeowDB (a few seconds; see *Game data* below).
 
 Play the game in **windowed or borderless** mode: exclusive fullscreen hides other windows, so
 the overlay can't show. Any window size works.
@@ -78,14 +79,19 @@ quickslot shows how many you have in all). It only asks you, once, if none of th
 - **Net profit** = meso change + (potions now − potions at start) × price. Buying potions
   mid-session isn't a loss, since you still have them; drinking them is.
 
-## Item data
+## Game data
 
 The potion and food list and icons come from
 [NiaMeowDB](https://meowdb.com/msclassic/item-db/use?subtype=Potion%2CFood)'s item database,
-and NPC shop prices from its NPC shop pages. They aren't included in this repository: each copy
-downloads them on first run into `data/items/` (`maple_tracker/itemdata.py`), since NiaMeowDB
-asks to be contacted before its data is republished. Where no open shop sells an item, its
-price is estimated as 10x what an NPC pays for it. Item icons are Nexon's.
+NPC shop prices from its NPC shop pages, and the EXP needed for each level from its
+[EXP table](https://meowdb.com/msclassic/guides/exp-table-level-1-to-100). They aren't included
+in this repository: each copy downloads them on first run into `data/`
+(`maple_tracker/itemdata.py`), since NiaMeowDB asks to be contacted before its data is
+republished. Where no open shop sells an item, its price is estimated as 10x what an NPC pays
+for it. Item icons are Nexon's.
+
+The EXP table is how the overlay knows your level: EXP ÷ % gives the EXP your level needs,
+which matches exactly one level. That also makes time to level exact.
 
 ## Development
 
@@ -96,7 +102,8 @@ price is estimated as 10x what an NPC pays for it. Item icons are Nexon's.
 `maple_tracker/tracker.py` holds the session math, `glyphs.py` the character reader,
 `locate.py` the finding of the numbers on screen, `screen.py` the capture, `items.py` and
 `itemdata.py` the potion and food recognition and data, `share.py` the text and picture for
-sharing, and `app.py` / `dialogs.py` the windows. `tools/build_assets.py` rebuilds the fonts
-the app ships with (`maple_tracker/assets/fonts.json`) from the screenshots in `tests/frames/`
-(cropped to the game's UI). Tests that recognise items are skipped until the item data has
-been downloaded (start the app once, or run `python -m maple_tracker.itemdata`).
+sharing, `card.py` the overlay's look, and `app.py` / `dialogs.py` the windows.
+`tools/build_assets.py` rebuilds the fonts the app ships with (`maple_tracker/assets/fonts.json`)
+from the screenshots in `tests/frames/` (cropped to the game's UI). Tests that recognise items
+are skipped until the game data has been downloaded (start the app once, or run
+`python -m maple_tracker.itemdata`).
