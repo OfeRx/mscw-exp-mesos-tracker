@@ -67,7 +67,7 @@ def download(folder: Path = FOLDER, progress=None):
         icon = folder / "icons" / f"{key}.png"
         if not icon.exists():
             try:
-                Image.open(BytesIO(_get(ICON_URL.format(id=key)))).convert("RGBA").save(icon)
+                Image.open(BytesIO(_get(ICON_URL.format(id=key), timeout=8))).convert("RGBA").save(icon)
             except Exception:
                 continue                    # no icon (a few items have none): leave it out
             time.sleep(0.15)                # go easy on their server

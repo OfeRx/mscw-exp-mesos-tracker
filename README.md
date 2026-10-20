@@ -15,14 +15,21 @@ reviewed it, so like any third-party tool, use it at your own risk.
 
 ## Setting it up
 
-You need **Windows** and **Python 3.14 or newer** (from [python.org](https://www.python.org);
+**The easy way (no Python needed):** download `MapleTracker-<version>-windows.zip` from this
+repository's Releases, unzip it anywhere, and double-click `MapleTracker.exe`. The program
+isn't signed, so the first time Windows may say "Windows protected your PC": click **More
+info**, then **Run anyway**. Your sessions and settings go in a `data` folder next to the exe;
+keep it when you update to a newer version.
+
+**From source:** you need **Python 3.14 or newer** (from [python.org](https://www.python.org);
 tick "Add python.exe to PATH" when installing).
 
 1. Get the code: `git clone` this repository, or download it as a ZIP and unzip it.
 2. Double-click `run.bat`. The first time, it sets up its own Python environment (a minute or
    two), then starts the tracker.
-3. On its first start the tracker downloads the potion and food list and icons, and the EXP
-   table, from NiaMeowDB (a few seconds; see *Game data* below).
+
+Either way, on its first start the tracker downloads the potion and food list and icons, and
+the EXP table, from NiaMeowDB (a few seconds; see *Game data* below). It only runs on Windows.
 
 Play the game in **windowed or borderless** mode: exclusive fullscreen hides other windows, so
 the overlay can't show. Any window size works.
@@ -114,3 +121,14 @@ sharing, `card.py` the overlay's look, and `app.py` / `dialogs.py` the windows.
 from the screenshots in `tests/frames/` (cropped to the game's UI). Tests that recognise items
 are skipped until the game data has been downloaded (start the app once, or run
 `python -m maple_tracker.itemdata`).
+
+### Building MapleTracker.exe
+
+```bash
+.venv\Scripts\python.exe -m pip install pyinstaller
+.venv\Scripts\python.exe tools\build_exe.py
+```
+
+This makes `dist\MapleTracker\` (the exe and what it needs) and
+`dist\MapleTracker-<version>-windows.zip` to upload as a release. The version is in
+`maple_tracker/__init__.py`.

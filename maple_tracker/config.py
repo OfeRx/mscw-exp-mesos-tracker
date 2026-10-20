@@ -3,9 +3,13 @@ from __future__ import annotations
 
 import copy
 import json
+import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+# Run from source: the project folder. Packaged as MapleTracker.exe: the exe's own folder, so the
+# data sits next to it (the packaged code itself is unpacked somewhere temporary).
+FROZEN = getattr(sys, "frozen", False)
+ROOT = Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 CONFIG = DATA / "config.json"
 GLYPHS = DATA / "glyphs.json"
