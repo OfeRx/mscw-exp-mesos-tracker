@@ -81,6 +81,7 @@ class View:
     expanded: bool = False
     message: str = ""
     message_clickable: bool = False
+    bar_note: str = "Looking for the EXP bar…"   # in the EXP bar while there's no reading
     buttons: list = field(default_factory=list)     # (name, text, primary, enabled)
     hover: str | None = None
     pressed: str | None = None
@@ -201,7 +202,7 @@ def render(v: View):
         _text(d, (tx + measure.textlength("EXP ", font=EXP_WORD_FONT), (y + 18) * S), number,
               BAR_FONT, VALUE, "lm", stroke=1)
     else:
-        _text(d, ((bx0 + bx1) / 2 * S, (y + 18) * S), "Looking for the EXP bar…", SMALL_FONT, MUTED, "mm")
+        _text(d, ((bx0 + bx1) / 2 * S, (y + 18) * S), v.bar_note, SMALL_FONT, MUTED, "mm")
 
     # EXP tiles: two rows of three.
     y = header + level_row

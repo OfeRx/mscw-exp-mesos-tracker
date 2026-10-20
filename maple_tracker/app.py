@@ -1,9 +1,13 @@
 """The overlay: a small always-on-top window with the live rates, plus the reading thread."""
 from __future__ import annotations
 
+import json
+import os
+import platform
 import queue
 import threading
 import time
+import zipfile
 from collections import defaultdict
 import tkinter as tk
 from datetime import datetime
@@ -352,9 +356,51 @@ class App:
                        activeforeground=fg, font=FONT)
         menu.add_checkbutton(label="Hide from screenshots and screen sharing",
                              variable=self.hide_var, command=self._toggle_hidden)
+        menu.add_command(label="Save diagnostics (for when numbers aren't read)",
+                         command=self.save_diagnostics)
         menu.add_separator()
         menu.add_command(label="Quit", command=self.quit)
         menu.tk_popup(e.x_root, e.y_root)
+
+    def save_diagnostics(self):
+        """A small zip to send whoever helps with the tracker when it can't read the numbers: the
+        EXP bar, meso field and quickslot as they look on this screen, and the screen and scale
+        details. Only those boxes, so no chat and no names."""
+        from PIL import Image
+
+        from . import __version__
+        from .items import QUICKSLOT
+        img, rect = self.grab_frame()
+        loc = Locator()
+        exp = loc.find_exp(gray(img)) if img is not None else None
+        mesos = loc.find_mesos(gray(img)) if exp else None
+        info = {
+            "version": __version__, "windows": platform.version(),
+            "screens": [dict(m) for m in self.ui_screen.sct.monitors[1:]],
+            "game_window": screen.game_rect(), "captured": rect,
+            "exp_label": exp and {"x": exp.x, "y": exp.y, "scale": exp.scale, "score": exp.score},
+            "game_px": exp and game_px(exp.scale), "mesos_label": bool(mesos),
+            "read": {k: (v or {}).get("text") for k, v in self.latest.items() if k in ("exp", "mesos")},
+        }
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        path = config.DATA / f"diagnostics-{stamp}.zip"
+        config.DATA.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+            z.writestr("info.json", json.dumps(info, indent=2, default=str))
+            boxes = {}
+            if exp:
+                boxes["exp_bar"] = exp.rect((-4, -4, 150, 24))          # the label and the numbers
+                boxes["quickslot"] = exp.rect(QUICKSLOT)
+            if mesos:
+                boxes["mesos"] = mesos.rect(MESOS_TEXT)
+            for name, (x, y, w, h) in boxes.items():
+                part = crop(img, (x, y, w, h))
+                if part is not None:
+                    buf = __import__("io").BytesIO()
+                    Image.fromarray(part).save(buf, "PNG")
+                    z.writestr(f"{name}.png", buf.getvalue())
+        os.startfile(config.DATA)
+        self.flash = (f"Saved {path.name} in the data folder: send it to whoever helps you.", time.time() + 8)
 
     def _toggle_hidden(self):
         self.cfg["hide_from_capture"] = self.hide_var.get()
@@ -656,6 +702,8 @@ class App:
         if mesos and mesos["value"] is not None:
             self.last_mesos = mesos["value"]
         v = card.View(hover=self._hover, pressed=self._pressed, expanded=self.expanded)
+        if out.get("found") and not reading:
+            v.bar_note = "Found the EXP bar, but can't read it"
         if reading:
             v.exp, v.pct = reading
         v.level = (s.exp.level() if s else None) or (level_of(*reading, self.exp_table) if reading else None)

@@ -32,7 +32,15 @@ Either way, on its first start the tracker downloads the potion and food list an
 the EXP table, from NiaMeowDB (a few seconds; see *Game data* below). It only runs on Windows.
 
 Play the game in **windowed or borderless** mode: exclusive fullscreen hides other windows, so
-the overlay can't show. Any window size works.
+the overlay can't show.
+
+**Window size:** the game enlarges its interface to fit the window. The tracker reads it
+reliably when that's a whole number of times the game's own size: a game area 1280×720 (1x),
+2560×1440 (2x, a 1440p screen) or 3840×2160 (3x, 4K). At in-between sizes, such as a 1080p
+screen (1.5x), it may not read the numbers yet: until that's supported, a 1280×720 window works.
+If the overlay says it found the EXP bar but can't read it, right-click it and choose **Save
+diagnostics**, and send the zip it saves (just the EXP bar, meso field and quickslot: no chat or
+names).
 
 ## Using it
 
