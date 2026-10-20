@@ -21,6 +21,8 @@ DEFAULTS = {
     "idle_seconds": 60,     # no EXP for this long: stop counting time
     "overlay_pos": None,
     "alpha": 0.9,
+    "zoom": 1.0,            # the overlay's size, 0.6 .. 1.5
+    "sections": ["bar", "exp", "exp2", "mesos", "buttons"],   # the parts of the overlay shown
 }
 
 

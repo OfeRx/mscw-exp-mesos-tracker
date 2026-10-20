@@ -85,6 +85,7 @@ class View:
     buttons: list = field(default_factory=list)     # (name, text, primary, enabled)
     hover: str | None = None
     pressed: str | None = None
+    sections: tuple = ("bar", "exp", "exp2", "mesos", "buttons")   # which parts to show
 
 
 def _grad(size, top, bottom):
@@ -127,21 +128,29 @@ def _wrap(d, text, font, width):
     return lines + ([line] if line else [])
 
 
-def render(v: View):
+SECTIONS = ("bar", "exp", "exp2", "mesos", "buttons")   # the parts that can be hidden
+
+
+def render(v: View, zoom=1.0):
     """(picture, {name: (x0, y0, x1, y1)}) at screen size: the card, and where its buttons
-    and other clickable parts are."""
+    and other clickable parts are. `zoom` sizes the whole card (0.6 to 1.5); parts not in
+    v.sections are left out, and without the buttons a Start/Stop control sits in the header."""
     pad = 12
+    show = set(v.sections)
     measure = ImageDraw.Draw(Image.new("RGB", (1, 1)))
     message_lines = _wrap(measure, v.message, TEXT_FONT, (W - 2 * pad - 8) * S) if v.message else []
-    detail_lines = v.details if v.expanded else []
+    detail_lines = v.details if v.expanded and "mesos" in show else []
+    main = next((b for b in v.buttons if b[0] == "main"), None)
 
     # Heights, top to bottom.
     header, level_row, tile_row, meso_head, button_row = 40, 50, 58, 26, 44
-    h = header + level_row + 2 * tile_row + 8 + meso_head + tile_row + 4
-    h += 22 if v.details else 0
-    h += len(detail_lines) * 18 + (6 if detail_lines else 0)
+    h = header + (level_row if "bar" in show else 6)
+    h += tile_row * (("exp" in show) + ("exp2" in show))
+    if "mesos" in show:
+        h += 8 + meso_head + tile_row + 4 + (22 if v.details else 0)
+        h += len(detail_lines) * 18 + (6 if detail_lines else 0)
     h += len(message_lines) * 18 + (8 if message_lines else 0)
-    h += button_row
+    h += button_row if "buttons" in show else 6
 
     img = Image.new("RGB", (W * S, h * S), KEY)
     d = ImageDraw.Draw(img)
@@ -150,132 +159,7 @@ def render(v: View):
     def box(x0, y0, x1, y1):
         return (x0 * S, y0 * S, x1 * S, y1 * S)
 
-    # Frame and panel.
-    _panel(img, box(0, 0, W, h), 14 * S, PANEL_TOP, PANEL_BOTTOM, outline=FRAME, width=2 * S)
-    d.rounded_rectangle(box(3, 3, W - 3, h - 3), 11 * S, outline=(70, 54, 36), width=S)
-
-    # Header: coin, title, state, close.
-    _panel(img, box(4, 4, W - 4, header), 10 * S, HEADER_TOP, HEADER_BOTTOM)
-    d.line((6 * S, header * S, (W - 6) * S, header * S), fill=FRAME_HI, width=S)
-    _coin(d, 24 * S, 22 * S, 8 * S)
-    _text(d, (40 * S, 22 * S), "MAPLE TRACKER", TITLE_FONT, TITLE, "lm")
-    close = (W - 34, 9, W - 10, 33)
-    hits["close"] = close
-    cx, cy = (close[0] + close[2]) / 2, (close[1] + close[3]) / 2
-    xcol = VALUE if v.hover == "close" else LABEL
-    for dx in (-5, 5):
-        d.line(((cx - 5) * S, (cy - dx) * S, (cx + 5) * S, (cy + dx) * S), fill=xcol, width=2 * S)
-    state_color = STATE_COLORS.get(v.state, MUTED)
-    right = W - 42
-    if v.clock:
-        _text(d, (right * S, 22 * S), v.clock, SMALL_FONT, VALUE, "rm")
-        right -= measure.textlength(v.clock, font=SMALL_FONT) / S + 12
-    _text(d, (right * S, 22 * S), v.state_text, SMALL_FONT, state_color, "rm")
-    dot_x = right - measure.textlength(v.state_text, font=SMALL_FONT) / S - 10
-    d.ellipse(((dot_x - 4) * S, 18 * S, (dot_x + 4) * S, 26 * S), fill=state_color)
-
-    # Level badge and EXP bar.
-    y = header + 8
-    digits = str(v.level) if v.level else "??"
-    badge_w = 44 + 24 * len(digits)
-    _panel(img, box(pad, y, pad + badge_w, y + 36), 8 * S, (30, 22, 15), (18, 13, 9),
-           outline=(98, 74, 46), width=S)
-    _text(d, ((pad + 8) * S, (y + 18) * S), "LV.", LV_FONT, VALUE, "lm", stroke=1)
-    for i, ch in enumerate(digits):
-        x0 = pad + 38 + 24 * i
-        top, bottom = (BOX_TOP, BOX_BOTTOM) if v.level else ((120, 104, 84), (84, 72, 58))
-        _panel(img, box(x0, y + 5, x0 + 21, y + 31), 5 * S, top, bottom, outline=(120, 56, 8), width=S)
-        _text(d, ((x0 + 10.5) * S, (y + 18) * S), ch, DIGIT_FONT, VALUE, "mm", stroke=1)
-    bx0, bx1 = pad + badge_w + 10, W - pad
-    _panel(img, box(bx0, y + 3, bx1, y + 33), 8 * S, (12, 9, 6), TRACK, outline=(98, 74, 46), width=S)
-    if v.pct is not None:
-        fill_w = max(0, min(1, v.pct / 100)) * (bx1 - bx0 - 6)
-        if fill_w >= 4:
-            _panel(img, box(bx0 + 3, y + 6, int(bx0 + 3 + fill_w), y + 30), 6 * S, BAR_TOP, BAR_BOTTOM)
-            d.line(((bx0 + 7) * S, (y + 9) * S, (bx0 + fill_w - 2) * S, (y + 9) * S),
-                   fill=(236, 255, 180), width=S)
-    if v.exp is not None:
-        number = f"{v.exp:,}" + (f" [{v.pct:.2f}%]" if v.pct is not None else "")
-        total_w = measure.textlength("EXP ", font=EXP_WORD_FONT) + measure.textlength(number, font=BAR_FONT)
-        tx = ((bx0 + bx1) * S - total_w) / 2
-        _text(d, (tx, (y + 18) * S), "EXP", EXP_WORD_FONT, (255, 240, 170), "lm", stroke=1)
-        _text(d, (tx + measure.textlength("EXP ", font=EXP_WORD_FONT), (y + 18) * S), number,
-              BAR_FONT, VALUE, "lm", stroke=1)
-    else:
-        _text(d, ((bx0 + bx1) / 2 * S, (y + 18) * S), v.bar_note, SMALL_FONT, MUTED, "mm")
-
-    # EXP tiles: two rows of three.
-    y = header + level_row
-    d.line((pad * S, y * S, (W - pad) * S, y * S), fill=(78, 60, 40), width=S)
-    col_w = (W - 2 * pad) / 3
-
-    def tiles(row, y0):
-        for i, (label, value, color, *note) in enumerate(row):
-            x = pad + i * col_w
-            if i:
-                d.line((x * S, (y0 + 10) * S, x * S, (y0 + tile_row - 8) * S), fill=(78, 60, 40), width=S)
-            _text(d, ((x + 10) * S, (y0 + 8) * S), label.upper(), LABEL_FONT, LABEL)
-            base = (y0 + 48) * S
-            _text(d, ((x + 10) * S, base), value, VALUE_FONT, color or VALUE, "ls", stroke=1)
-            if note and note[0]:
-                nx = (x + 10) * S + measure.textlength(value, font=VALUE_FONT) + 5 * S
-                _text(d, (nx, base), note[0], SMALL_FONT, LABEL, "ls")
-
-    tiles(v.tiles[:3], y)
-    y += tile_row
-    d.line(((pad + 8) * S, y * S, (W - pad - 8) * S, y * S), fill=(66, 51, 35), width=S)
-    tiles(v.tiles[3:6], y)
-    y += tile_row + 8
-
-    # Mesos and potions.
-    d.line((pad * S, y * S, (W - pad) * S, y * S), fill=FRAME, width=S)
-    _coin(d, (pad + 10) * S, (y + 13) * S, 6 * S)
-    _text(d, ((pad + 22) * S, (y + 13) * S), "MESOS & POTIONS", LABEL_FONT, TITLE, "lm")
-    right = W - pad
-    if v.mesos is not None:
-        count = f"{v.mesos:,}"
-        _text(d, (right * S, (y + 13) * S), count, SMALL_FONT, GOLD, "rm", stroke=1)
-        right -= measure.textlength(count, font=SMALL_FONT) / S + 14
-    if v.meso_extra:
-        _text(d, (right * S, (y + 13) * S), v.meso_extra[0], SMALL_FONT, v.meso_extra[1], "rm")
-    y += meso_head
-    tiles(v.meso_tiles[:3], y)
-    y += tile_row + 4
-
-    # Potion details, folded away until asked for.
-    if v.details:
-        hits["details"] = (pad, y, W - pad, y + 20)
-        color = VALUE if v.hover == "details" else LABEL
-        ax, ay = (pad + 8) * S, (y + 10) * S
-        r = 4 * S
-        arrow = [(ax - r, ay - r // 2), (ax + r, ay - r // 2), (ax, ay + r)] if v.expanded else \
-            [(ax - r // 2, ay - r), (ax - r // 2, ay + r), (ax + r, ay)]
-        d.polygon(arrow, fill=color)
-        _text(d, ((pad + 18) * S, (y + 10) * S), "Potion and food counts", SMALL_FONT, color, "lm")
-        y += 22
-        for line in detail_lines:
-            _text(d, ((pad + 18) * S, (y + 9) * S), line, TEXT_FONT, LABEL, "lm")
-            y += 18
-        if detail_lines:
-            y += 6
-
-    # A message, if there's something to say.
-    if message_lines:
-        y0 = y
-        for line in message_lines:
-            _text(d, ((pad + 4) * S, (y + 9) * S), line, TEXT_FONT, AMBER, "lm")
-            y += 18
-        if v.message_clickable:
-            hits["message"] = (pad, y0, W - pad, y)
-        y += 8
-
-    # Buttons.
-    n = len(v.buttons)
-    gap = 6
-    bw = (W - 2 * pad - gap * (n - 1)) / max(1, n)
-    for i, (name, text, primary, enabled) in enumerate(v.buttons):
-        x0 = pad + i * (bw + gap)
-        b = (int(x0), y + 4, int(x0 + bw), y + 34)
+    def button(name, text, primary, enabled, b):
         top, bottom = (PRIMARY_TOP, PRIMARY_BOTTOM) if primary else (BUTTON_TOP, BUTTON_BOTTOM)
         if not enabled:
             top, bottom = (58, 46, 33), (46, 36, 26)
@@ -290,11 +174,154 @@ def render(v: View):
         if enabled:
             hits[name] = b
 
-    small = img.resize((W, h), Image.LANCZOS)
+    # Frame and panel.
+    _panel(img, box(0, 0, W, h), 14 * S, PANEL_TOP, PANEL_BOTTOM, outline=FRAME, width=2 * S)
+    d.rounded_rectangle(box(3, 3, W - 3, h - 3), 11 * S, outline=(70, 54, 36), width=S)
+
+    # Header: coin, title, state, close (and Start/Stop when the buttons are hidden).
+    _panel(img, box(4, 4, W - 4, header), 10 * S, HEADER_TOP, HEADER_BOTTOM)
+    d.line((6 * S, header * S, (W - 6) * S, header * S), fill=FRAME_HI, width=S)
+    _coin(d, 24 * S, 22 * S, 8 * S)
+    _text(d, (40 * S, 22 * S), "MAPLE TRACKER", TITLE_FONT, TITLE, "lm")
+    close = (W - 34, 9, W - 10, 33)
+    hits["close"] = close
+    cx, cy = (close[0] + close[2]) / 2, (close[1] + close[3]) / 2
+    xcol = VALUE if v.hover == "close" else LABEL
+    for dx in (-5, 5):
+        d.line(((cx - 5) * S, (cy - dx) * S, (cx + 5) * S, (cy + dx) * S), fill=xcol, width=2 * S)
+    right = W - 42
+    if main and "buttons" not in show:
+        bw = measure.textlength(main[1], font=BUTTON_FONT) / S + 20
+        button(*main, (int(right - bw), 9, int(right), 33))
+        right -= bw + 10
+    state_color = STATE_COLORS.get(v.state, MUTED)
+    if v.clock:
+        _text(d, (right * S, 22 * S), v.clock, SMALL_FONT, VALUE, "rm")
+        right -= measure.textlength(v.clock, font=SMALL_FONT) / S + 12
+    _text(d, (right * S, 22 * S), v.state_text, SMALL_FONT, state_color, "rm")
+    dot_x = right - measure.textlength(v.state_text, font=SMALL_FONT) / S - 10
+    d.ellipse(((dot_x - 4) * S, 18 * S, (dot_x + 4) * S, 26 * S), fill=state_color)
+
+    # Level badge and EXP bar.
+    if "bar" in show:
+        y = header + 8
+        digits = str(v.level) if v.level else "??"
+        badge_w = 44 + 24 * len(digits)
+        _panel(img, box(pad, y, pad + badge_w, y + 36), 8 * S, (30, 22, 15), (18, 13, 9),
+               outline=(98, 74, 46), width=S)
+        _text(d, ((pad + 8) * S, (y + 18) * S), "LV.", LV_FONT, VALUE, "lm", stroke=1)
+        for i, ch in enumerate(digits):
+            x0 = pad + 38 + 24 * i
+            top, bottom = (BOX_TOP, BOX_BOTTOM) if v.level else ((120, 104, 84), (84, 72, 58))
+            _panel(img, box(x0, y + 5, x0 + 21, y + 31), 5 * S, top, bottom, outline=(120, 56, 8), width=S)
+            _text(d, ((x0 + 10.5) * S, (y + 18) * S), ch, DIGIT_FONT, VALUE, "mm", stroke=1)
+        bx0, bx1 = pad + badge_w + 10, W - pad
+        _panel(img, box(bx0, y + 3, bx1, y + 33), 8 * S, (12, 9, 6), TRACK, outline=(98, 74, 46), width=S)
+        if v.pct is not None:
+            fill_w = max(0, min(1, v.pct / 100)) * (bx1 - bx0 - 6)
+            if fill_w >= 4:
+                _panel(img, box(bx0 + 3, y + 6, int(bx0 + 3 + fill_w), y + 30), 6 * S, BAR_TOP, BAR_BOTTOM)
+                d.line(((bx0 + 7) * S, (y + 9) * S, (bx0 + fill_w - 2) * S, (y + 9) * S),
+                       fill=(236, 255, 180), width=S)
+        if v.exp is not None:
+            number = f"{v.exp:,}" + (f" [{v.pct:.2f}%]" if v.pct is not None else "")
+            total_w = measure.textlength("EXP ", font=EXP_WORD_FONT) + measure.textlength(number, font=BAR_FONT)
+            tx = ((bx0 + bx1) * S - total_w) / 2
+            _text(d, (tx, (y + 18) * S), "EXP", EXP_WORD_FONT, (255, 240, 170), "lm", stroke=1)
+            _text(d, (tx + measure.textlength("EXP ", font=EXP_WORD_FONT), (y + 18) * S), number,
+                  BAR_FONT, VALUE, "lm", stroke=1)
+        else:
+            _text(d, ((bx0 + bx1) / 2 * S, (y + 18) * S), v.bar_note, SMALL_FONT, MUTED, "mm")
+        y = header + level_row
+    else:
+        y = header + 6
+
+    col_w = (W - 2 * pad) / 3
+
+    def tiles(row, y0):
+        for i, (label, value, color, *note) in enumerate(row):
+            x = pad + i * col_w
+            if i:
+                d.line((x * S, (y0 + 10) * S, x * S, (y0 + tile_row - 8) * S), fill=(78, 60, 40), width=S)
+            _text(d, ((x + 10) * S, (y0 + 8) * S), label.upper(), LABEL_FONT, LABEL)
+            base = (y0 + 48) * S
+            _text(d, ((x + 10) * S, base), value, VALUE_FONT, color or VALUE, "ls", stroke=1)
+            if note and note[0]:
+                nx = (x + 10) * S + measure.textlength(value, font=VALUE_FONT) + 5 * S
+                _text(d, (nx, base), note[0], SMALL_FONT, LABEL, "ls")
+
+    # EXP tiles: up to two rows of three.
+    first = True
+    for name, row in (("exp", v.tiles[:3]), ("exp2", v.tiles[3:6])):
+        if name not in show:
+            continue
+        if "bar" in show or not first:
+            d.line(((pad + 8) * S, y * S, (W - pad - 8) * S, y * S), fill=(66, 51, 35), width=S)
+        tiles(row, y)
+        y += tile_row
+        first = False
+
+    # Mesos and potions.
+    if "mesos" in show:
+        y += 8
+        d.line((pad * S, y * S, (W - pad) * S, y * S), fill=FRAME, width=S)
+        _coin(d, (pad + 10) * S, (y + 13) * S, 6 * S)
+        _text(d, ((pad + 22) * S, (y + 13) * S), "MESOS & POTIONS", LABEL_FONT, TITLE, "lm")
+        right = W - pad
+        if v.mesos is not None:
+            count = f"{v.mesos:,}"
+            _text(d, (right * S, (y + 13) * S), count, SMALL_FONT, GOLD, "rm", stroke=1)
+            right -= measure.textlength(count, font=SMALL_FONT) / S + 14
+        if v.meso_extra:
+            _text(d, (right * S, (y + 13) * S), v.meso_extra[0], SMALL_FONT, v.meso_extra[1], "rm")
+        y += meso_head
+        tiles(v.meso_tiles[:3], y)
+        y += tile_row + 4
+
+        # Potion details, folded away until asked for.
+        if v.details:
+            hits["details"] = (pad, y, W - pad, y + 20)
+            color = VALUE if v.hover == "details" else LABEL
+            ax, ay = (pad + 8) * S, (y + 10) * S
+            r = 4 * S
+            arrow = [(ax - r, ay - r // 2), (ax + r, ay - r // 2), (ax, ay + r)] if v.expanded else \
+                [(ax - r // 2, ay - r), (ax - r // 2, ay + r), (ax + r, ay)]
+            d.polygon(arrow, fill=color)
+            _text(d, ((pad + 18) * S, (y + 10) * S), "Potion and food counts", SMALL_FONT, color, "lm")
+            y += 22
+            for line in detail_lines:
+                _text(d, ((pad + 18) * S, (y + 9) * S), line, TEXT_FONT, LABEL, "lm")
+                y += 18
+            if detail_lines:
+                y += 6
+
+    # A message, if there's something to say.
+    if message_lines:
+        y0 = y
+        for line in message_lines:
+            _text(d, ((pad + 4) * S, (y + 9) * S), line, TEXT_FONT, AMBER, "lm")
+            y += 18
+        if v.message_clickable:
+            hits["message"] = (pad, y0, W - pad, y)
+        y += 8
+
+    # Buttons.
+    if "buttons" in show:
+        n = len(v.buttons)
+        gap = 6
+        bw = (W - 2 * pad - gap * (n - 1)) / max(1, n)
+        for i, (name, text, primary, enabled) in enumerate(v.buttons):
+            x0 = pad + i * (bw + gap)
+            button(name, text, primary, enabled, (int(x0), y + 4, int(x0 + bw), y + 34))
+
+    # Down to screen size, at the chosen zoom.
+    zw, zh = max(1, round(W * zoom)), max(1, round(h * zoom))
+    small = img.resize((zw, zh), Image.LANCZOS)
     # Corners outside the frame: exactly the see-through colour, with no blended edge.
-    outside = Image.new("L", (W, h), 0)
-    ImageDraw.Draw(outside).rounded_rectangle((0, 0, W - 1, h - 1), 14, fill=255)
-    small.paste(Image.new("RGB", (W, h), KEY), (0, 0), Image.eval(outside, lambda a: 255 - a))
+    outside = Image.new("L", (zw, zh), 0)
+    ImageDraw.Draw(outside).rounded_rectangle((0, 0, zw - 1, zh - 1), max(4, round(14 * zoom)), fill=255)
+    small.paste(Image.new("RGB", (zw, zh), KEY), (0, 0), Image.eval(outside, lambda a: 255 - a))
+    hits = {name: tuple(round(c * zoom) for c in b) for name, b in hits.items()}
     return small, hits
 
 

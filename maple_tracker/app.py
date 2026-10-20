@@ -311,7 +311,10 @@ class App:
         self.teach_entry = entry
         self._teaching = None
         self.card.bind("<Button-3>", self._menu)
+        self.card.bind("<Control-MouseWheel>", lambda e: self.set_zoom(self.zoom + (0.1 if e.delta > 0 else -0.1)))
         self.hide_var = tk.BooleanVar(value=bool(self.cfg.get("hide_from_capture")))
+        self.zoom = self.cfg.get("zoom", 1.0)
+        self.teach_title.config(wraplength=max(200, round(440 * self.zoom)))
         r.after(200, lambda: self.apply_capture(r))
 
     # Clicks on the card: a button acts when released over it; anywhere else drags the window.
@@ -352,10 +355,43 @@ class App:
         """Show the window in screenshots and screen sharing, or hide it, as set."""
         screen.set_capture_hidden(window, bool(self.cfg.get("hide_from_capture")))
 
+    LAYOUTS = [("bar", "Level and EXP bar"), ("exp", "EXP: last 5 min, per hour, to level"),
+               ("exp2", "EXP: session, real time, time"), ("mesos", "Mesos and potions"),
+               ("buttons", "Buttons")]
+    COMPACT = ["bar", "exp"]
+
     def _menu(self, e):
         bg, fg = "#2a2017", "#fcf8f0"
-        menu = tk.Menu(self.root, tearoff=0, bg=bg, fg=fg, activebackground="#6e5639",
-                       activeforeground=fg, font=FONT)
+        style = dict(tearoff=0, bg=bg, fg=fg, activebackground="#6e5639", activeforeground=fg,
+                     selectcolor=fg, font=FONT)
+        menu = tk.Menu(self.root, **style)
+        # The buttons' actions, for when the buttons are hidden (or just handier here).
+        for name, text, primary, enabled in (self._shown.buttons if self._shown else []):
+            menu.add_command(label=text, command=self.actions[name], state="normal" if enabled else "disabled")
+        menu.add_separator()
+
+        size = tk.Menu(menu, **style)
+        self._zoom_var = tk.IntVar(value=round(self.zoom * 100))
+        for pct in range(60, 151, 10):
+            size.add_radiobutton(label=f"{pct}%", value=pct, variable=self._zoom_var,
+                                 command=lambda p=pct: self.set_zoom(p / 100))
+        menu.add_cascade(label="Size (or Ctrl + mouse wheel)", menu=size)
+        show = tk.Menu(menu, **style)
+        self._section_vars = {}
+        for name, label in self.LAYOUTS:
+            var = self._section_vars[name] = tk.BooleanVar(value=name in self.cfg["sections"])
+            show.add_checkbutton(label=label, variable=var, command=lambda n=name: self.toggle_section(n))
+        show.add_separator()
+        show.add_command(label="Compact: the bar and one row", command=lambda: self.set_sections(self.COMPACT))
+        show.add_command(label="Everything", command=lambda: self.set_sections([n for n, _ in self.LAYOUTS]))
+        menu.add_cascade(label="Show", menu=show)
+        see = tk.Menu(menu, **style)
+        self._alpha_var = tk.IntVar(value=round(self.cfg["alpha"] * 100))
+        for pct in (100, 90, 80, 70, 60, 50, 40):
+            see.add_radiobutton(label=f"{pct}%" + ("  (solid)" if pct == 100 else ""), value=pct,
+                                variable=self._alpha_var, command=lambda p=pct: self.set_alpha(p / 100))
+        menu.add_cascade(label="Opacity", menu=see)
+        menu.add_separator()
         menu.add_checkbutton(label="Hide from screenshots and screen sharing",
                              variable=self.hide_var, command=self._toggle_hidden)
         menu.add_command(label="Save diagnostics (for when numbers aren't read)",
@@ -411,6 +447,30 @@ class App:
             self.apply_capture(w)
         self.flash = ("Hidden from screenshots and screen sharing." if self.hide_var.get()
                       else "Shown in screenshots and screen sharing.", time.time() + 4)
+
+    def set_zoom(self, zoom):
+        """Make the overlay bigger or smaller (0.6x to 1.5x)."""
+        zoom = round(min(1.5, max(0.6, zoom)), 1)
+        if zoom != self.zoom:
+            self.zoom = self.cfg["zoom"] = zoom
+            self.teach_title.config(wraplength=max(200, round(440 * zoom)))
+            config.save(self.cfg)
+            self._shown = None
+            self._redraw()
+
+    def toggle_section(self, name):
+        shown = [n for n, _ in self.LAYOUTS if n in self.cfg["sections"] or n == name]
+        self.set_sections([n for n in shown if n != name] if name in self.cfg["sections"] else shown)
+
+    def set_sections(self, names):
+        self.cfg["sections"] = list(names)
+        config.save(self.cfg)
+        self._redraw()
+
+    def set_alpha(self, alpha):
+        self.cfg["alpha"] = alpha
+        self.root.attributes("-alpha", alpha)
+        config.save(self.cfg)
 
     def _toggle_details(self):
         self.expanded = not self.expanded
@@ -695,7 +755,7 @@ class App:
     def _render(self, now):
         v = self._view(now)
         if v != self._shown:                    # only draw when something changed
-            img, self._hits = card.render(v)
+            img, self._hits = card.render(v, self.zoom)
             self._card_photo = ImageTk.PhotoImage(img)
             self.card.config(image=self._card_photo)
             self._shown = v
@@ -708,7 +768,8 @@ class App:
         mesos = out.get("mesos")
         if mesos and mesos["value"] is not None:
             self.last_mesos = mesos["value"]
-        v = card.View(hover=self._hover, pressed=self._pressed, expanded=self.expanded)
+        v = card.View(hover=self._hover, pressed=self._pressed, expanded=self.expanded,
+                      sections=tuple(self.cfg["sections"]))
         if out.get("found") and not reading:
             v.bar_note = "The game picture is stretched: see below" if self.stretched \
                 else "Found the EXP bar, but can't read it"

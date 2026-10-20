@@ -73,6 +73,17 @@ quickslot and in the inventory. The overlay lists each one, with the count it st
 the count now, so you can check it read them right. If your UI looks different and it can't
 find the EXP bar, it offers to let you point it out by hand.
 
+To make the overlay smaller and less in the way, right-click it:
+
+- **Size** goes from 60% to 150% (or hold Ctrl and turn the mouse wheel over it).
+- **Show** picks which parts to keep: the level and EXP bar, either row of EXP numbers, mesos
+  and potions, and the buttons. **Compact** keeps just the bar and one row. With the buttons
+  hidden, Start/Stop moves into the title bar, and every button's action is in the right-click
+  menu too.
+- **Opacity** lets the game show through.
+
+It remembers all of these, and where you dragged it, for next time.
+
 The overlay shows up in screenshots, screen sharing and streams (OBS, Discord). Right-click it
 to hide it from those instead. Either way it never reads itself: it blacks its own windows out
 of what it reads, so it can sit anywhere, as long as it doesn't cover the EXP bar, quickslot or

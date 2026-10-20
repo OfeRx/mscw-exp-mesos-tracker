@@ -40,3 +40,22 @@ def test_a_disabled_button_cant_be_clicked():
 def test_card_without_level_or_reading():
     img, _ = render(view(level=None, exp=None, pct=None, state="off", clock=""))
     assert img.width == W
+
+
+def test_hidden_parts_make_it_slimmer():
+    full, _ = render(view())
+    compact, hits = render(view(sections=("bar", "exp")))
+    bare, _ = render(view(sections=()))
+    assert bare.height < compact.height < full.height
+    # Without the buttons, Start/Stop sits in the header, and only it can be clicked.
+    assert "main" in hits and "pause" not in hits and "details" not in hits
+    assert hits["main"][3] < 40
+
+
+def test_size():
+    full, hits = render(view())
+    small, small_hits = render(view(), zoom=0.6)
+    assert small.width == round(W * 0.6) and small.height == round(full.height * 0.6)
+    x0, y0, x1, y1 = small_hits["share"]
+    assert hit(small_hits, (x0 + x1) // 2, (y0 + y1) // 2) == "share"
+    assert x0 == round(hits["share"][0] * 0.6)
