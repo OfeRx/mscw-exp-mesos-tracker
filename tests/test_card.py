@@ -59,3 +59,9 @@ def test_size():
     x0, y0, x1, y1 = small_hits["share"]
     assert hit(small_hits, (x0 + x1) // 2, (y0 + y1) // 2) == "share"
     assert x0 == round(hits["share"][0] * 0.6)
+
+
+def test_missing_mesos_hint_takes_the_numbers_place():
+    plain, _ = render(view())
+    hint, _ = render(view(mesos=None, meso_hint=("Open your inventory once", "to start counting")))
+    assert hint.size == plain.size

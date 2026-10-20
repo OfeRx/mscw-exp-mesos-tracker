@@ -1,4 +1,5 @@
-"""The windows besides the overlay: potions, pointing things out by hand, and the summary."""
+"""The windows besides the overlay: potions, pointing things out by hand, the summary and the
+history."""
 from __future__ import annotations
 
 import tkinter as tk
@@ -6,7 +7,7 @@ from tkinter import messagebox
 
 from PIL import Image, ImageDraw, ImageTk
 
-from . import config, fmt, share
+from . import card, config, history, share
 from .glyphs import parse_exp, parse_number, parse_typed_number
 from .screen import Screen, game_origin, make_region, region_rect
 
@@ -332,53 +333,103 @@ class ManualSetup(Dialog):
         button(nav, "Done", self.destroy).pack(side="right")
 
 
-# --------------------------------------------------------------------------- summary
+# --------------------------------------------------------------------------- summary and history
+
+def _shown(big):
+    """A picture drawn at card.S times the size, at screen size."""
+    return ImageTk.PhotoImage(big.resize((big.width // card.S, big.height // card.S), Image.LANCZOS))
+
 
 class SummaryWindow(Dialog):
+    """One session: the picture that Copy image puts on the clipboard, and the buttons."""
+
     def __init__(self, app, s):
         super().__init__(app, "Session summary")
-        heading(self.body, "Session summary")
-        rows = [
-            ("Time grinding", f"{fmt.clock(s['active_seconds'])}  (of "
-                              f"{fmt.clock(s.get('real_seconds', s['total_seconds']))} real time)"),
-            ("EXP gained", fmt.commas(s["exp_gained"]) + (f"  (+{s['levels']} level"
-                                                         f"{'s' if s['levels'] > 1 else ''})" if s["levels"] else "")),
-            ("EXP / hour", fmt.commas(s["exp_per_hour"])),
-            ("EXP / hour, real time", fmt.commas(s.get("exp_per_hour_real"))),
-            ("Mesos", f"{fmt.commas(s['mesos_start'])} → {fmt.commas(s['mesos_end'])}  "
-                      f"({fmt.short(s['mesos_delta'], sign=True)})"),
-        ]
-        for p in s["potions"]:
-            extra = f", +{p['added']} bought/looted" if p["added"] else ""
-            rows.append((p["name"], f"{p['used']} used × {p['price']} = {fmt.commas(p['cost'])}{extra}"))
-        rows += [
-            ("Potion cost", fmt.commas(s["potion_cost"])),
-            ("Net profit", fmt.commas(s["net_mesos"])),
-            ("Net / hour", fmt.commas(s["net_per_hour"])),
-            ("Net / hour, real time", fmt.commas(s.get("net_per_hour_real"))),
-        ]
-        grid = tk.Frame(self.body, bg=BG)
-        grid.pack(anchor="w")
-        for i, (k, v) in enumerate(rows):
-            bold = k in ("Net profit", "Net / hour", "EXP / hour")
-            label(grid, k, fg=MUTED).grid(row=i, column=0, sticky="w", padx=(0, 16), pady=1)
-            label(grid, v, font=BOLD if bold else FONT).grid(row=i, column=1, sticky="w", pady=1)
-        para(self.body, f"\nSaved to {config.HISTORY}")
+        self.body.config(padx=10, pady=10)
         self.record = s
-        nav = tk.Frame(self, bg=BG, padx=16, pady=10)
-        nav.pack(fill="x", side="bottom")
-        button(nav, "Copy text", self._copy_text).pack(side="left")
-        button(nav, "Copy image", self._copy_image).pack(side="left", padx=6)
+        self.big = share.summary_card(s, icon=app.library.icon)
+        self._photo = _shown(self.big)
+        tk.Label(self.body, image=self._photo, bg=BG, bd=0).pack()
+        nav = tk.Frame(self, bg=BG, padx=10)
+        nav.pack(fill="x")
+        button(nav, "Copy image", self._copy_image).pack(side="left")
+        button(nav, "Copy text", self._copy_text).pack(side="left", padx=6)
+        button(nav, "All sessions", lambda: HistoryWindow(app)).pack(side="left")
         button(nav, "Close", self.destroy).pack(side="right")
-        self.copied = label(self, "", fg=GOOD, padx=16)
-        self.copied.pack(anchor="w", side="bottom")
+        self.copied = label(self, "For Discord or WhatsApp: copy, then paste with Ctrl+V.", fg=MUTED, padx=10)
+        self.copied.pack(anchor="w", pady=(6, 10))
 
     def _copy_text(self):
         share.copy_text(self, share.summary_text(self.record))
         self.copied.config(text="Copied. Paste it into Discord or WhatsApp with Ctrl+V.", fg=GOOD)
 
     def _copy_image(self):
-        if share.copy_image(share.summary_card(self.record)):
+        if share.copy_image(self.big):
             self.copied.config(text="Picture copied. Paste it into Discord or WhatsApp with Ctrl+V.", fg=GOOD)
         else:
             self.copied.config(text="Couldn't reach the clipboard: try again.", fg=WARN)
+
+
+class HistoryWindow(Dialog):
+    """Every saved session, newest first: click one to see it in full."""
+
+    def __init__(self, app):
+        super().__init__(app, "Session history")
+        self.body.config(padx=10, pady=10)
+        self.canvas = tk.Canvas(self.body, bg=BG, highlightthickness=0, bd=0, cursor="hand2")
+        self.canvas.pack(side="left")
+        self.canvas.bind("<MouseWheel>", lambda e: self.canvas.yview_scroll(-e.delta // 40, "units"))
+        self.canvas.bind("<Motion>", self._hover)
+        self.canvas.bind("<Leave>", lambda e: self.canvas.delete("hover"))
+        self.canvas.bind("<ButtonRelease-1>", self._open)
+        self.canvas.bind("<Button-3>", self._menu)
+        self.bar = tk.Scrollbar(self.body, command=self.canvas.yview)
+        self.canvas.config(yscrollcommand=self.bar.set, yscrollincrement=8)
+        self.refresh()
+
+    def refresh(self):
+        big, self.rows = history.render(config.load_history())
+        self._photo = _shown(big)
+        w, h = self._photo.width(), self._photo.height()
+        tall = h > self.HEIGHT
+        self.canvas.delete("all")
+        self.canvas.create_image(0, 0, image=self._photo, anchor="nw")
+        self.canvas.config(width=w, height=min(h, self.HEIGHT), scrollregion=(0, 0, w, h))
+        if tall:
+            self.bar.pack(side="right", fill="y")
+        else:
+            self.bar.pack_forget()
+
+    HEIGHT = 640
+
+    def _row(self, e):
+        y = self.canvas.canvasy(e.y)
+        return next((row for row in self.rows if row[0] <= y < row[1]), None)
+
+    def _hover(self, e):
+        self.canvas.delete("hover")
+        row = self._row(e)
+        if row:
+            self.canvas.create_rectangle(16, row[0], history.W - 16, row[1], outline="#d6ac62", width=1,
+                                         tags="hover")
+
+    def _open(self, e):
+        row = self._row(e)
+        if row:
+            SummaryWindow(self.app, row[2])
+
+    def _menu(self, e):
+        row = self._row(e)
+        if not row:
+            return
+        menu = tk.Menu(self, tearoff=0, bg=BG, fg=FG, activebackground="#6e5639", activeforeground=FG, font=FONT)
+        menu.add_command(label="See it in full", command=lambda: SummaryWindow(self.app, row[2]))
+        menu.add_command(label="Delete from history…", command=lambda: self._delete(row[2]))
+        menu.tk_popup(e.x_root, e.y_root)
+
+    def _delete(self, record):
+        when = history._date(record)
+        if messagebox.askyesno("Delete session", f"Delete the session from {when} from your history?",
+                               parent=self):
+            config.delete_history(record)
+            self.refresh()

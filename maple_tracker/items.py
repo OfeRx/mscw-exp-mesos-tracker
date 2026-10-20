@@ -73,6 +73,11 @@ class ItemLibrary:
         self.by_name = {i.name: i for i in items}
         self._scale, self._templates = None, []
 
+    def icon(self, name):
+        """An item's icon as a picture (RGBA), or None."""
+        item = self.by_name.get(name)
+        return Image.fromarray(self._icons[item.id]) if item else None
+
     def _build(self, game_px):
         if self._scale == round(game_px, 3):
             return self._templates

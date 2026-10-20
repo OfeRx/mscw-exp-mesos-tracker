@@ -77,6 +77,7 @@ class View:
     mesos: int | None = None              # current meso count
     meso_tiles: list = field(default_factory=list)  # (label, value, colour[, note]) x 3
     meso_extra: tuple | None = None       # (text, colour) beside the meso count: the potion bill
+    meso_hint: tuple | None = None        # (title, line) in place of the meso numbers, when unread
     details: list = field(default_factory=list)     # lines about each potion
     expanded: bool = False
     message: str = ""
@@ -114,6 +115,39 @@ def _text(d, xy, text, font, fill, anchor="la", stroke=0):
 def _coin(d, cx, cy, r):
     d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(240, 176, 48), outline=(122, 76, 16), width=S)
     d.ellipse((cx - r * 0.55, cy - r * 0.55, cx + r * 0.55, cy + r * 0.55), outline=(255, 226, 140), width=S)
+
+
+def level_badge(img, x, y, level, digit_color=None):
+    """The game's level badge, "LV." and orange number boxes, 36 high at (x, y) (drawing size
+    / S). Grey "??" when the level isn't known. Returns its width."""
+    d = ImageDraw.Draw(img)
+    digits = str(level) if level else "??"
+    w = 44 + 24 * len(digits)
+    _panel(img, (x * S, y * S, (x + w) * S, (y + 36) * S), 8 * S, (30, 22, 15), (18, 13, 9),
+           outline=(98, 74, 46), width=S)
+    _text(d, ((x + 8) * S, (y + 18) * S), "LV.", LV_FONT, VALUE, "lm", stroke=1)
+    for i, ch in enumerate(digits):
+        x0 = x + 38 + 24 * i
+        top, bottom = digit_color or ((BOX_TOP, BOX_BOTTOM) if level else ((120, 104, 84), (84, 72, 58)))
+        _panel(img, (x0 * S, (y + 5) * S, (x0 + 21) * S, (y + 31) * S), 5 * S, top, bottom,
+               outline=(120, 56, 8), width=S)
+        _text(d, ((x0 + 10.5) * S, (y + 18) * S), ch, DIGIT_FONT, VALUE, "mm", stroke=1)
+    return w
+
+
+def stat_tiles(d, row, x, y, width, height=58):
+    """A row of stats side by side: a small label over a big number (and a note after it)."""
+    col_w = width / max(1, len(row))
+    for i, (label, value, color, *note) in enumerate(row):
+        x0 = x + i * col_w
+        if i:
+            d.line((x0 * S, (y + 10) * S, x0 * S, (y + height - 8) * S), fill=(78, 60, 40), width=S)
+        _text(d, ((x0 + 10) * S, (y + 8) * S), label.upper(), LABEL_FONT, LABEL)
+        base = (y + 48) * S
+        _text(d, ((x0 + 10) * S, base), value, VALUE_FONT, color or VALUE, "ls", stroke=1)
+        if note and note[0]:
+            nx = (x0 + 10) * S + d.textlength(value, font=VALUE_FONT) + 5 * S
+            _text(d, (nx, base), note[0], SMALL_FONT, LABEL, "ls")
 
 
 def _wrap(d, text, font, width):
@@ -205,16 +239,7 @@ def render(v: View, zoom=1.0):
     # Level badge and EXP bar.
     if "bar" in show:
         y = header + 8
-        digits = str(v.level) if v.level else "??"
-        badge_w = 44 + 24 * len(digits)
-        _panel(img, box(pad, y, pad + badge_w, y + 36), 8 * S, (30, 22, 15), (18, 13, 9),
-               outline=(98, 74, 46), width=S)
-        _text(d, ((pad + 8) * S, (y + 18) * S), "LV.", LV_FONT, VALUE, "lm", stroke=1)
-        for i, ch in enumerate(digits):
-            x0 = pad + 38 + 24 * i
-            top, bottom = (BOX_TOP, BOX_BOTTOM) if v.level else ((120, 104, 84), (84, 72, 58))
-            _panel(img, box(x0, y + 5, x0 + 21, y + 31), 5 * S, top, bottom, outline=(120, 56, 8), width=S)
-            _text(d, ((x0 + 10.5) * S, (y + 18) * S), ch, DIGIT_FONT, VALUE, "mm", stroke=1)
+        badge_w = level_badge(img, pad, y, v.level)
         bx0, bx1 = pad + badge_w + 10, W - pad
         _panel(img, box(bx0, y + 3, bx1, y + 33), 8 * S, (12, 9, 6), TRACK, outline=(98, 74, 46), width=S)
         if v.pct is not None:
@@ -236,19 +261,8 @@ def render(v: View, zoom=1.0):
     else:
         y = header + 6
 
-    col_w = (W - 2 * pad) / 3
-
     def tiles(row, y0):
-        for i, (label, value, color, *note) in enumerate(row):
-            x = pad + i * col_w
-            if i:
-                d.line((x * S, (y0 + 10) * S, x * S, (y0 + tile_row - 8) * S), fill=(78, 60, 40), width=S)
-            _text(d, ((x + 10) * S, (y0 + 8) * S), label.upper(), LABEL_FONT, LABEL)
-            base = (y0 + 48) * S
-            _text(d, ((x + 10) * S, base), value, VALUE_FONT, color or VALUE, "ls", stroke=1)
-            if note and note[0]:
-                nx = (x + 10) * S + measure.textlength(value, font=VALUE_FONT) + 5 * S
-                _text(d, (nx, base), note[0], SMALL_FONT, LABEL, "ls")
+        stat_tiles(d, row, pad, y0, W - 2 * pad, tile_row)
 
     # EXP tiles: up to two rows of three.
     first = True
@@ -275,7 +289,19 @@ def render(v: View, zoom=1.0):
         if v.meso_extra:
             _text(d, (right * S, (y + 13) * S), v.meso_extra[0], SMALL_FONT, v.meso_extra[1], "rm")
         y += meso_head
-        tiles(v.meso_tiles[:3], y)
+        if v.meso_hint:
+            # In place of the empty numbers: what to do to fill them in.
+            _panel(img, box(pad + 4, y + 6, W - pad - 4, y + tile_row - 4), 8 * S, (66, 48, 24), (44, 32, 18),
+                   outline=(150, 110, 50), width=S)
+            kx, ky = pad + 16, y + tile_row // 2 + 1
+            _panel(img, box(kx, ky - 14, kx + 28, ky + 14), 6 * S, (250, 240, 220), (196, 180, 150),
+                   outline=(90, 66, 36), width=S)
+            _text(d, ((kx + 14) * S, ky * S), "I", BAR_FONT, INK, "mm")
+            title, rest = v.meso_hint
+            _text(d, ((kx + 40) * S, (ky - 9) * S), title, BUTTON_FONT, AMBER, "lm")
+            _text(d, ((kx + 40) * S, (ky + 9) * S), rest, TEXT_FONT, LABEL, "lm")
+        else:
+            tiles(v.meso_tiles[:3], y)
         y += tile_row + 4
 
         # Potion details, folded away until asked for.

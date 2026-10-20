@@ -1,4 +1,5 @@
 """Number and time formatting for the overlay and summary."""
+from datetime import datetime
 
 
 def commas(n):
@@ -32,3 +33,13 @@ def eta(seconds):
     if m >= 60 * 48:
         return "> 2 days"
     return f"{m // 60}h {m % 60:02d}m" if m >= 60 else f"{m}m"
+
+
+def at(seconds, now):
+    """When something `seconds` from `now` happens, as a clock time: '21:45', 'Thu 09:10'
+    when it's not today, or '' when it's more than 2 days off (or not known)."""
+    if seconds is None or seconds > 48 * 3600:
+        return ""
+    when = datetime.fromtimestamp(now + seconds)
+    return when.strftime("%H:%M") if when.date() == datetime.fromtimestamp(now).date() \
+        else when.strftime("%a %H:%M")

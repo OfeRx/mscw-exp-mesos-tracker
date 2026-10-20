@@ -16,7 +16,7 @@ from tkinter import messagebox
 from PIL import Image, ImageTk
 
 from . import card, config, fmt, itemdata, screen, share
-from .dialogs import FONT, ManualSetup, PricesDialog, RegionSelector, SummaryWindow
+from .dialogs import FONT, HistoryWindow, ManualSetup, PricesDialog, RegionSelector, SummaryWindow
 from .glyphs import GlyphStore, parse_exp, parse_number
 from .items import (INVENTORY, QUICKSLOT, ItemLibrary, Spot, combine, read_count,
                     teach_counts)
@@ -368,6 +368,7 @@ class App:
         # The buttons' actions, for when the buttons are hidden (or just handier here).
         for name, text, primary, enabled in (self._shown.buttons if self._shown else []):
             menu.add_command(label=text, command=self.actions[name], state="normal" if enabled else "disabled")
+        menu.add_command(label="Session history", command=lambda: HistoryWindow(self))
         menu.add_separator()
 
         size = tk.Menu(menu, **style)
@@ -800,15 +801,19 @@ class App:
                 v.state, v.state_text = "tracking", "Tracking"
             v.clock = fmt.clock(s.active(now))
             pct, pct_real = s.pct_rate(now), s.pct_rate_real(now)
-            eta = fmt.eta(s.tnl_seconds(now))
+            tnl = s.tnl_seconds(now)
+            when = fmt.at(tnl, now)                 # "Lv. 40 at 21:45", if you keep this pace
+            if v.level and when:
+                to_level = f"Lv. {v.level + 1} at {when}"
             v.tiles = [("Last 5 min", fmt.short(s.recent_exp(now), sign=True), None),
                        (grinding, fmt.short(s.exp_rate(now)), None, f"{pct:.1f}%" if pct else ""),
-                       (to_level, eta, None),
+                       (to_level, fmt.eta(tnl), None),
                        ("This session", fmt.short(s.exp_gained, sign=True), None),
                        (real, fmt.short(s.exp_rate_real(now)), None, f"{pct_real:.1f}%" if pct_real else ""),
                        ("Time", fmt.clock(s.active(now)), None, f"of {fmt.clock(s.real(now))[:-3]}")]
             if s.mesos_start is None:
                 v.meso_tiles = [(m_grinding, dash, None), (m_real, dash, None), ("Net mesos", dash, None)]
+                v.meso_hint = ("Open your inventory once", "to start counting mesos and potions")
             else:
                 color = card.GOLD if s.net_mesos >= 0 else card.RED
                 v.meso_tiles = [(m_grinding, fmt.short(s.net_rate(now), sign=True), color),
@@ -889,8 +894,8 @@ class App:
             return self._stretch_advice(out), None
         if self.stopping:
             return "Open your inventory to record your final mesos, or press Finish now.", None
-        if s and s.mesos_start is None:
-            return "Open your inventory once so I can note your mesos and potions.", None
+        if s and s.mesos_start is None and "mesos" not in self.cfg["sections"]:
+            return "Open your inventory once so I can note your mesos and potions.", None   # else the card shows it
         if self.count_hint:
             return f"Open your inventory for a moment so I can learn your {self.count_hint} count.", None
         if s and self.items_latest.get("other_tab"):

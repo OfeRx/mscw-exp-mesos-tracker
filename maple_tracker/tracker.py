@@ -367,6 +367,7 @@ class Session:
 
     def summary(self, now=None):
         now = self.clock() if now is None else now
+        level = self.exp.level()
         return {
             "started": self.started,
             "ended": self.ended,
@@ -375,6 +376,8 @@ class Session:
             "real_seconds": round(self.real(now)),
             "exp_gained": self.exp_gained,
             "levels": self.exp.levels,
+            "level_start": level - self.exp.levels if level else None,
+            "level_end": level,
             "exp_per_hour": self.exp_rate(now),
             "exp_per_hour_real": self.exp_rate_real(now),
             "pct_per_hour": self.pct_rate(now),

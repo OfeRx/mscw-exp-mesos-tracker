@@ -54,14 +54,19 @@ bar, meso field and quickslot: no chat or names).
 ## Using it
 
 1. Press **Start**, and open your inventory on the **Use** tab once, so it can note your
-   mesos and every potion and food stack.
+   mesos and every potion and food stack. Until it has, the mesos part of the overlay says so.
 2. Grind. EXP and the potions on your quickslot are read live; opening your inventory now and
-   then keeps the meso count current.
+   then keeps the meso count current. The overlay also says when you'll reach the next level
+   at this pace ("Lv. 40 at 21:45").
 3. Press **Stop** with your inventory open (or open it after pressing Stop) and you get the
-   summary.
-4. To show friends, press **Copy text** or **Copy image** in the summary and paste into
-   Discord or WhatsApp with Ctrl+V. **Share** on the overlay copies your stats so far mid-grind
-   (or the last session's).
+   summary: levels gained, EXP and mesos per hour, and what each potion and food cost.
+4. To show friends, press **Copy image** or **Copy text** in the summary and paste into
+   Discord or WhatsApp with Ctrl+V. The image is the summary itself. **Share** on the overlay
+   copies your stats so far mid-grind (or the last session's).
+
+Right-click the overlay and choose **Session history** to see every session you've saved,
+newest first, with your best EXP/hour and mesos/hour (from sessions of 10 minutes or more).
+Click one to see its summary, or right-click it to delete it.
 
 If the potion counts ever look wrong, open your inventory on the **Use** tab and press
 **Recheck**: it reads everything again right away and believes what it sees. **Prices** shows
@@ -143,8 +148,8 @@ which matches exactly one level. That also makes time to level exact.
 
 `maple_tracker/tracker.py` holds the session math, `glyphs.py` the character reader,
 `locate.py` the finding of the numbers on screen, `screen.py` the capture, `items.py` and
-`itemdata.py` the potion and food recognition and data, `share.py` the text and picture for
-sharing, `card.py` the overlay's look, and `app.py` / `dialogs.py` the windows.
+`itemdata.py` the potion and food recognition and data, `share.py` the summary's text and
+picture, `history.py` the session history picture, `card.py` the overlay's look, and `app.py` / `dialogs.py` the windows.
 `tools/build_assets.py` rebuilds the fonts the app ships with (`maple_tracker/assets/fonts.json`)
 from the screenshots in `tests/frames/` (cropped to the game's UI). Tests that recognise items
 are skipped until the game data has been downloaded (start the app once, or run

@@ -8,9 +8,8 @@ import ctypes
 import io
 from ctypes import wintypes
 from datetime import datetime
-from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 from . import fmt
 
@@ -60,86 +59,157 @@ def summary_text(s, live=False):
 
 # --------------------------------------------------------------------------- the picture
 
-BG, PANEL, FG, MUTED = (31, 24, 17), (54, 41, 29), (252, 248, 240), (196, 172, 138)
-GOLD, GREEN, BLUE, RED = (255, 206, 92), (150, 232, 120), (252, 248, 240), (255, 128, 112)
-FONTS = Path(r"C:\Windows\Fonts")
+CARD_W = 520
 
 
-def _font(name, size):
-    try:
-        return ImageFont.truetype(str(FONTS / name), size)
-    except OSError:
-        return ImageFont.load_default(size)
+def _changes(p):
+    parts = [f"{p['used']} drunk"] if p["used"] else []
+    parts += [f"+{p['added']} bought"] if p["added"] else []
+    parts += [f"{p['removed']} put away"] if p.get("removed") else []
+    return " · ".join(parts)
 
 
-def summary_card(s, live=False):
-    """The session's stats as a picture, to paste into a chat."""
-    w, pad = 640, 28
-    title, big, small = _font("seguibl.ttf", 26), _font("seguisb.ttf", 30), _font("segoeui.ttf", 17)
-    label = _font("segoeuib.ttf", 15)
-    tiles = [("EXP / HOUR", fmt.short(s["exp_per_hour"]), BLUE,
-              f"{fmt.short(s['exp_per_hour_real'])}/h in real time" if s.get("exp_per_hour_real")
-              else f"{s['pct_per_hour']:.1f}% of a level" if s.get("pct_per_hour") else ""),
-             ("EXP GAINED", fmt.commas(s["exp_gained"]), BLUE,
-              f"+{s['levels']} level{'s' if s['levels'] > 1 else ''}" if s["levels"] else "")]
-    if s["mesos_start"] is not None:
-        real = s.get("net_per_hour_real")
-        tiles += [("MESOS / HOUR", fmt.short(s["net_per_hour"], sign=True), GOLD,
-                   f"{fmt.short(real, sign=True)}/h in real time" if real is not None else "net, after potions"),
-                  ("MESOS NET", fmt.short(s["net_mesos"], sign=True), GOLD,
-                   f"{fmt.short(s['mesos_delta'], sign=True)} in your wallet")]
-    rows = (len(tiles) + 1) // 2
-    tile_h, gap = 104, 14
-    h = pad + 40 + 26 + rows * (tile_h + gap) + 70 + pad
-    img = Image.new("RGB", (w, h), BG)
+def _span(s):
+    """'20 Oct · 21:30 – 23:06'"""
+    start = s.get("started")
+    if not start:
+        return ""
+    start = datetime.fromisoformat(start) if isinstance(start, str) else datetime.fromtimestamp(start)
+    end = s.get("ended")
+    end = datetime.fromisoformat(end) if isinstance(end, str) else datetime.fromtimestamp(end) if end else None
+    return start.strftime("%d %b · %H:%M") + (end.strftime(" – %H:%M") if end else "")
+
+
+def summary_card(s, live=False, icon=None):
+    """A session as a picture in the overlay's look, for the summary window and to paste into a
+    chat: the levels gained, EXP and mesos per hour, and what each potion cost. `icon(name)`
+    gives an item's icon, when known. Drawn at twice the size (card.S), for a sharp paste."""
+    from . import card
+    from .card import (AMBER, BAR_FONT, EXP_WORD_FONT, FRAME, FRAME_HI, GOLD, GREEN, HEADER_BOTTOM,
+                       HEADER_TOP, LABEL, LABEL_FONT, MUTED, PANEL_BOTTOM, PANEL_TOP, RED, S, SMALL_FONT,
+                       TEXT_FONT, TITLE, TITLE_FONT, VALUE, VALUE_FONT, _coin, _panel, _text)
+    W, pad = CARD_W, 16
+    changed = sorted((p for p in s["potions"] if p["used"] or p["added"] or p.get("removed")),
+                     key=lambda p: (-p["cost"], p["name"]))
+    unchanged = [p["name"] for p in s["potions"] if p not in changed]
+    has_mesos = s["mesos_start"] is not None
+    header, hero, tile_h, section, row_h = 44, 64, 58, 32, 30
+    h = header + hero + tile_h + section + (tile_h if has_mesos else 40)
+    h += 10 + max(1, len(changed)) * row_h + (22 if unchanged else 0) + (34 if changed else 0) + 30
+
+    img = Image.new("RGB", (W * S, h * S), (20, 15, 10))
     d = ImageDraw.Draw(img)
-    # A coin by the title, like the overlay's header.
-    cy, r = pad + 17, 11
-    d.ellipse((pad, cy - r, pad + 2 * r, cy + r), fill=(240, 176, 48), outline=(122, 76, 16), width=2)
-    d.ellipse((pad + 5, cy - r + 5, pad + 2 * r - 5, cy + r - 5), outline=(255, 226, 140), width=2)
-    d.text((pad + 2 * r + 10, pad), "MapleStory Classic grind" + (" (so far)" if live else ""),
-           font=title, fill=(244, 210, 135))
-    d.text((pad, pad + 40), f"{_when(s.get('started'))}  ·  {_hours(s['active_seconds'])} grinding",
-           font=small, fill=MUTED)
-    y = pad + 40 + 34
-    tw = (w - 2 * pad - gap) // 2
-    for i, (name, value, color, note) in enumerate(tiles):
-        x = pad + (i % 2) * (tw + gap)
-        ty = y + (i // 2) * (tile_h + gap)
-        d.rounded_rectangle((x, ty, x + tw, ty + tile_h), 12, fill=PANEL)
-        d.text((x + 16, ty + 12), name, font=label, fill=MUTED)
-        d.text((x + 16, ty + 32), value, font=big, fill=color)
-        if note:
-            d.text((x + 16, ty + 74), note, font=small, fill=MUTED)
-    y += rows * (tile_h + gap) + 4
-    d.text((pad, y), "POTIONS", font=label, fill=MUTED)
-    lines = _wrap(d, potions_line(s), small, w - 2 * pad)
-    for i, line in enumerate(lines):
-        d.text((pad, y + 22 + i * 22), line, font=small, fill=RED if s["potion_cost"] else FG)
-    bottom = y + 22 + len(lines) * 22 + 30
-    if bottom > h:                          # a long potion list: make room for it
-        img = img.crop((0, 0, w, bottom))
-        img.paste(BG, (0, h, w, bottom))
-        d = ImageDraw.Draw(img)
-        h = bottom
-    d.text((w - pad, h - 12), "Maple Tracker", font=label, fill=MUTED, anchor="rs")
-    # The overlay's gold frame.
-    d.rectangle((0, 0, w - 1, h - 1), outline=(139, 104, 55), width=3)
-    d.rectangle((4, 4, w - 5, h - 5), outline=(70, 54, 36), width=1)
+
+    def box(x0, y0, x1, y1):
+        return (x0 * S, y0 * S, x1 * S, y1 * S)
+
+    def divider(y):
+        d.line(((pad + 4) * S, y * S, (W - pad - 4) * S, y * S), fill=(66, 51, 35), width=S)
+
+    _panel(img, box(0, 0, W, h), 14 * S, PANEL_TOP, PANEL_BOTTOM, outline=FRAME, width=2 * S)
+    d.rounded_rectangle(box(3, 3, W - 3, h - 3), 11 * S, outline=(70, 54, 36), width=S)
+
+    # Header: the coin, the title, and when.
+    _panel(img, box(4, 4, W - 4, header), 10 * S, HEADER_TOP, HEADER_BOTTOM)
+    d.line((6 * S, header * S, (W - 6) * S, header * S), fill=FRAME_HI, width=S)
+    _coin(d, 24 * S, 24 * S, 8 * S)
+    _text(d, (40 * S, 24 * S), "SESSION SO FAR" if live else "SESSION SUMMARY", TITLE_FONT, TITLE, "lm")
+    _text(d, ((W - pad) * S, 24 * S), _span(s), SMALL_FONT, LABEL, "rm")
+
+    # The levels, and the EXP gained.
+    y = header + 14
+    x = pad
+    start, end = s.get("level_start"), s.get("level_end")
+    if end:
+        if s["levels"] and start:
+            x += card.level_badge(img, x, y, start, digit_color=((120, 104, 84), (84, 72, 58))) + 8
+            ax, ay = x + 6, y + 18
+            d.polygon([(ax * S, (ay - 7) * S), ((ax + 10) * S, ay * S), (ax * S, (ay + 7) * S)], fill=GOLD)
+            x += 24
+        x += card.level_badge(img, x, y, end) + 18
+    gained = f"+{fmt.commas(s['exp_gained'])}" if s["exp_gained"] > 0 else fmt.commas(s["exp_gained"])
+    _text(d, (x * S, (y + 18) * S), gained, VALUE_FONT, VALUE, "ls", stroke=1)
+    gx = x * S + d.textlength(gained, font=VALUE_FONT) + 6 * S
+    _text(d, (gx, (y + 18) * S), "EXP", EXP_WORD_FONT, (255, 240, 170), "ls", stroke=1)
+    if s["levels"]:
+        note, color = f"+{s['levels']} level{'s' if s['levels'] > 1 else ''}!", GREEN
+    else:
+        note, color = "gained this session", LABEL
+    _text(d, (x * S, (y + 33) * S), note, BAR_FONT if s["levels"] else TEXT_FONT, color, "lm")
+    y = header + hero
+
+    # EXP per hour, both ways, and the time.
+    divider(y)
+    pct, pct_real = s.get("pct_per_hour"), s.get("pct_per_hour_real")
+    card.stat_tiles(d, [
+        ("EXP / h · grinding", fmt.short(s["exp_per_hour"]), None, f"{pct:.1f}%" if pct else ""),
+        ("EXP / h · real time", fmt.short(s.get("exp_per_hour_real")), None,
+         f"{pct_real:.1f}%" if pct_real else ""),
+        ("Time grinding", _hours(s["active_seconds"]), None,
+         f"of {_hours(s.get('real_seconds', s['total_seconds']))}")], pad, y, W - 2 * pad, tile_h)
+    y += tile_h
+
+    # Mesos.
+    y += 6
+    d.line((pad * S, y * S, (W - pad) * S, y * S), fill=FRAME, width=S)
+    _coin(d, (pad + 10) * S, (y + 14) * S, 6 * S)
+    _text(d, ((pad + 22) * S, (y + 14) * S), "MESOS & POTIONS", LABEL_FONT, TITLE, "lm")
+    if has_mesos:
+        wallet = f"{fmt.commas(s['mesos_start'])} → {fmt.commas(s['mesos_end'])}"
+        _text(d, ((W - pad) * S, (y + 14) * S), wallet, SMALL_FONT, GOLD, "rm")
+    y += section - 6
+    if has_mesos:
+        color = GOLD if s["net_mesos"] >= 0 else RED
+        real = s.get("net_per_hour_real")
+        card.stat_tiles(d, [
+            ("Mesos / h · grinding", fmt.short(s["net_per_hour"], sign=True), color),
+            ("Mesos / h · real time", fmt.short(real, sign=True) if real is not None else "—", color),
+            ("Net mesos", fmt.short(s["net_mesos"], sign=True), color)], pad, y, W - 2 * pad, tile_h)
+        y += tile_h
+    else:
+        _text(d, ((pad + 10) * S, (y + 20) * S), "Mesos weren't read: open your inventory during a session "
+              "to count them.", TEXT_FONT, AMBER, "lm")
+        y += 40
+
+    # Each potion and food that changed, with its icon and what it cost.
+    y += 10
+    if not changed:
+        _text(d, ((pad + 10) * S, (y + row_h / 2) * S), "No potions or food drunk.", TEXT_FONT, LABEL, "lm")
+        y += row_h
+    for i, p in enumerate(changed):
+        if i % 2 == 0:
+            _panel(img, box(pad, y, W - pad, y + row_h), 6 * S, (62, 47, 32), (56, 42, 29))
+        pic = icon(p["name"]) if icon else None
+        if pic is not None:
+            k = 22 * S / max(pic.size)
+            pic = pic.convert("RGBA").resize((max(1, round(pic.width * k)), max(1, round(pic.height * k))),
+                                             Image.NEAREST)
+            img.paste(pic, (round((pad + 19) * S - pic.width / 2), round((y + row_h / 2) * S - pic.height / 2)),
+                      pic)
+        cy = (y + row_h / 2) * S
+        _text(d, ((pad + 38) * S, cy), p["name"], SMALL_FONT, VALUE, "lm")
+        _text(d, ((pad + 210) * S, cy), _changes(p), TEXT_FONT, LABEL, "lm")
+        cost = f"-{fmt.commas(p['cost'])}" if p["cost"] else "—"
+        _text(d, ((W - pad - 10) * S, cy), cost, SMALL_FONT, RED if p["cost"] else MUTED, "rm")
+        y += row_h
+    if unchanged:
+        line = "Unchanged: " + ", ".join(unchanged)
+        while d.textlength(line, font=TEXT_FONT) > (W - 2 * pad - 20) * S:
+            line = line[:line.rfind(",")] + ", …"
+            if line.count(",") <= 1:
+                break
+        _text(d, ((pad + 10) * S, (y + 11) * S), line, TEXT_FONT, MUTED, "lm")
+        y += 22
+    if changed:
+        divider(y + 6)
+        _text(d, ((pad + 10) * S, (y + 22) * S), "POTION COST", LABEL_FONT, LABEL, "lm")
+        total = f"-{fmt.commas(s['potion_cost'])} mesos" if s["potion_cost"] else "0"
+        _text(d, ((W - pad - 10) * S, (y + 22) * S), total, BAR_FONT, RED if s["potion_cost"] else LABEL, "rm",
+              stroke=1)
+        y += 34
+
+    _text(d, ((W - pad) * S, (h - 12) * S), "Maple Tracker", LABEL_FONT, MUTED, "rs")
     return img
-
-
-def _wrap(d, text, font, width):
-    """Split text into lines that fit, breaking after commas."""
-    lines, line = [], ""
-    for part in text.split(", "):
-        candidate = f"{line}, {part}" if line else part
-        if line and d.textlength(candidate, font=font) > width:
-            lines.append(line + ",")
-            line = part
-        else:
-            line = candidate
-    return lines + [line]
 
 
 # --------------------------------------------------------------------------- the clipboard

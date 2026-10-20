@@ -47,3 +47,28 @@ def append_history(record):
     DATA.mkdir(parents=True, exist_ok=True)
     with HISTORY.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
+
+
+def load_history():
+    """Every saved session, oldest first (lines that can't be read are skipped)."""
+    records = []
+    if HISTORY.exists():
+        for line in HISTORY.read_text("utf-8").splitlines():
+            try:
+                records.append(json.loads(line))
+            except ValueError:
+                continue
+    return records
+
+
+def delete_history(record):
+    """Take one session out of the history (the first saved with the same start)."""
+    kept, gone = [], False
+    for r in load_history():
+        if not gone and r.get("started") == record.get("started") and r.get("ended") == record.get("ended"):
+            gone = True
+            continue
+        kept.append(r)
+    tmp = HISTORY.with_suffix(".tmp")
+    tmp.write_text("".join(json.dumps(r) + "\n" for r in kept), "utf-8")
+    tmp.replace(HISTORY)
